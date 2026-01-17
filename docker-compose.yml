@@ -1,0 +1,130 @@
+version: '3.8'
+
+services:
+  # ---------------- Infrastructure ----------------
+  mosquitto:
+    image: eclipse-mosquitto:latest
+    container_name: mqtt_broker
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    restart: always
+
+  influxdb:
+    image: influxdb:latest
+    container_name: knowledge_db
+    hostname: influxdb
+    restart: always
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_USER:-admin}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_PASSWORD:-adminadmin}
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG:-poultry_farm}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET:-poultry_farm}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN:-poultryfarmtoken}
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    depends_on:
+      - mosquitto
+
+  # ---------------- Microservices ----------------
+  
+  configuration:
+    build: src/configuration
+    container_name: service_configuration
+    ports:
+      - "5001:5000"
+    restart: always
+
+  monitor:
+    build: src/monitor
+    container_name: service_monitor
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN:-poultryfarmtoken}
+      - INFLUXDB_ORG=${INFLUXDB_ORG:-poultry_farm}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-poultry_farm}
+    depends_on:
+      - mosquitto
+      - influxdb
+    restart: always
+
+  analyzer:
+    build: src/analyzer
+    container_name: service_analyzer
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+      - CONFIG_SERVICE_URL=http://configuration:5000
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN:-poultryfarmtoken}
+      - INFLUXDB_ORG=${INFLUXDB_ORG:-poultry_farm}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-poultry_farm}
+    depends_on:
+      - mosquitto
+      - configuration
+      - influxdb
+    restart: always
+
+  planner:
+    build: src/planner
+    container_name: service_planner
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+      - CONFIG_SERVICE_URL=http://configuration:5000
+    depends_on:
+      - mosquitto
+      - configuration
+    restart: always
+
+  executor:
+    build: src/executor
+    container_name: service_executor
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN:-poultryfarmtoken}
+      - INFLUXDB_ORG=${INFLUXDB_ORG:-poultry_farm}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-poultry_farm}
+    depends_on:
+      - mosquitto
+      - influxdb
+    restart: always
+
+  managed_resources:
+    build: src/managed_resources
+    container_name: service_simulator
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+    depends_on:
+      - mosquitto
+    restart: always
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    hostname: grafana
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_INSTALL_PLUGINS=
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+    depends_on:
+      - influxdb
+
+volumes:
+  influxdb_data:
+  grafana_data:
