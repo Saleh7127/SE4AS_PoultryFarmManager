@@ -2,3 +2,5 @@ read_pdf.py
 How_To_Run_Project.md
 DATA_FLOW_DOCUMENTATION.md
 .DS_Store
+.env
+.venv
