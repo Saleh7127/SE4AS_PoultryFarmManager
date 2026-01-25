@@ -4,14 +4,11 @@ datasources:
   - name: InfluxDB
     type: influxdb
     access: proxy
-    url: http://influxdb:8086
     isDefault: true
+    url: ${INFLUXDB_URL}
     jsonData:
       version: Flux
-      organization: poultry_farm
-      defaultBucket: poultry_farm
-      tlsSkipVerify: true
+      organization: ${INFLUXDB_ORG}
+      defaultBucket: ${INFLUXDB_BUCKET}
     secureJsonData:
-      token: poultryfarmtoken
-    editable: true
-
+      token: ${INFLUXDB_ADMIN_TOKEN}

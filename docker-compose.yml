@@ -1,130 +1,160 @@
-version: '3.8'
+version: "3.9"
 
 services:
-  # ---------------- Infrastructure ----------------
-  mosquitto:
-    image: eclipse-mosquitto:latest
-    container_name: mqtt_broker
+  # ==========================
+  # MQTT broker (Mosquitto)
+  # ==========================
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    container_name: mqtt
+    env_file: .env
     ports:
       - "1883:1883"
-      - "9001:9001"
     volumes:
-      - ./mosquitto/config:/mosquitto/config
-      - ./mosquitto/data:/mosquitto/data
-      - ./mosquitto/log:/mosquitto/log
-    restart: always
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./mosquitto/passwordfile:/mosquitto/config/passwordfile
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    networks:
+      - farm-net
+    restart: unless-stopped
 
+
+  # ==========================
+  # InfluxDB v2 (Knowledge)
+  # ==========================
   influxdb:
-    image: influxdb:latest
-    container_name: knowledge_db
-    hostname: influxdb
-    restart: always
-    environment:
-      - DOCKER_INFLUXDB_INIT_MODE=setup
-      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_USER:-admin}
-      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_PASSWORD:-adminadmin}
-      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG:-poultry_farm}
-      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET:-poultry_farm}
-      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN:-poultryfarmtoken}
+    image: influxdb:2.7
+    container_name: influxdb
+    env_file: .env
     ports:
       - "8086:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_ADMIN_USER}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_ADMIN_PASSWORD}
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_ADMIN_TOKEN}
     volumes:
-      - influxdb_data:/var/lib/influxdb2
-    depends_on:
-      - mosquitto
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+    networks:
+      - farm-net
+    restart: unless-stopped
 
-  # ---------------- Microservices ----------------
-  
-  configuration:
-    build: src/configuration
-    container_name: service_configuration
-    ports:
-      - "5001:5000"
-    restart: always
-
-  monitor:
-    build: src/monitor
-    container_name: service_monitor
-    environment:
-      - MQTT_BROKER_HOST=mosquitto
-      - INFLUXDB_URL=http://influxdb:8086
-      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN:-poultryfarmtoken}
-      - INFLUXDB_ORG=${INFLUXDB_ORG:-poultry_farm}
-      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-poultry_farm}
-    depends_on:
-      - mosquitto
-      - influxdb
-    restart: always
-
-  analyzer:
-    build: src/analyzer
-    container_name: service_analyzer
-    environment:
-      - MQTT_BROKER_HOST=mosquitto
-      - CONFIG_SERVICE_URL=http://configuration:5000
-      - INFLUXDB_URL=http://influxdb:8086
-      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN:-poultryfarmtoken}
-      - INFLUXDB_ORG=${INFLUXDB_ORG:-poultry_farm}
-      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-poultry_farm}
-    depends_on:
-      - mosquitto
-      - configuration
-      - influxdb
-    restart: always
-
-  planner:
-    build: src/planner
-    container_name: service_planner
-    environment:
-      - MQTT_BROKER_HOST=mosquitto
-      - CONFIG_SERVICE_URL=http://configuration:5000
-    depends_on:
-      - mosquitto
-      - configuration
-    restart: always
-
-  executor:
-    build: src/executor
-    container_name: service_executor
-    environment:
-      - MQTT_BROKER_HOST=mosquitto
-      - INFLUXDB_URL=http://influxdb:8086
-      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN:-poultryfarmtoken}
-      - INFLUXDB_ORG=${INFLUXDB_ORG:-poultry_farm}
-      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-poultry_farm}
-    depends_on:
-      - mosquitto
-      - influxdb
-    restart: always
-
-  managed_resources:
-    build: src/managed_resources
-    container_name: service_simulator
-    environment:
-      - MQTT_BROKER_HOST=mosquitto
-    depends_on:
-      - mosquitto
-    restart: always
-
+  # ==========================
+  # Grafana (Dashboards)
+  # Auto-provisioned datasource
+  # ==========================
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana-oss:latest
     container_name: grafana
-    hostname: grafana
-    restart: always
+    env_file: .env
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
-      - GF_SERVER_ROOT_URL=http://localhost:3000
-      - GF_INSTALL_PLUGINS=
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
     volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
-      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+
     depends_on:
       - influxdb
+    networks:
+      - farm-net
+    restart: unless-stopped
+
+  # ==========================
+  # Managed Resource
+  # Environment (sensors + actuators)
+  # ==========================
+  environment:
+    build:
+      context: .
+      dockerfile: environment/Dockerfile
+    container_name: environment
+    env_file: .env
+    depends_on:
+      - mqtt
+    networks:
+      - farm-net
+    restart: unless-stopped
+
+  # ==========================
+  # MAPE-K: Monitor (M)
+  # ==========================
+  monitor:
+    build:
+      context: .
+      dockerfile: monitor/Dockerfile
+    container_name: monitor
+    env_file: .env
+    depends_on:
+      - mqtt
+      - influxdb
+    networks:
+      - farm-net
+    restart: unless-stopped
+
+  # ==========================
+  # MAPE-K: Analyzer (A)
+  # ==========================
+  analyzer:
+    build:
+      context: .
+      dockerfile: analyzer/Dockerfile
+    container_name: analyzer
+    env_file: .env
+    depends_on:
+      - influxdb
+    networks:
+      - farm-net
+    restart: unless-stopped
+
+  # ==========================
+  # MAPE-K: Planner (P)
+  # ==========================
+  planner:
+    build:
+      context: .
+      dockerfile: planner/Dockerfile
+    container_name: planner
+    env_file: .env
+    depends_on:
+      - mqtt
+    networks:
+      - farm-net
+    restart: unless-stopped
+
+  # ==========================
+  # MAPE-K: Executor (E)
+  # ==========================
+  executor:
+    build:
+      context: .
+      dockerfile: executor/Dockerfile
+    container_name: executor
+    env_file: .env
+    depends_on:
+      - mqtt
+      - influxdb
+    networks:
+      - farm-net
+    restart: unless-stopped
+
+# ==========================
+# Networks & Volumes
+# ==========================
+networks:
+  farm-net:
 
 volumes:
-  influxdb_data:
-  grafana_data:
+  mosquitto-data:
+  mosquitto-log:
+  influxdb-data:
+  influxdb-config:
+  grafana-data:
