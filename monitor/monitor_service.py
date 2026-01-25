@@ -1,15 +1,11 @@
-import os
+# monitor/monitor_service.py (or wherever start_monitor is)
 import json
-from influxdb_client import Point
-from common.influx_utils import create_influx_client
 from common.mqtt_utils import create_mqtt_client
-from common.config import FARM_ID, SENSOR_MEASUREMENT
-
-INFLUX_BUCKET = os.getenv("INFLUXDB_BUCKET")
+from common.config import FARM_ID
+from common.knowledge import KnowledgeStore
 
 def start_monitor():
-    influx = create_influx_client()
-    write_api = influx.write_api()
+    ks = KnowledgeStore()
     mqtt_client = create_mqtt_client("monitor")
 
     topic = f"{FARM_ID}/+/sensors/+"
@@ -29,71 +25,35 @@ def start_monitor():
             return
 
         _, zone, _, sensor_type = parts
-        points = []
 
         if sensor_type == "air":
             temp = data.get("temperature_c")
             co2 = data.get("co2_ppm")
             nh3 = data.get("nh3_ppm")
             if temp is not None:
-                points.append(
-                    Point(SENSOR_MEASUREMENT)
-                    .tag("zone", zone)
-                    .tag("type", "temperature")
-                    .field("value", float(temp))
-                )
+                ks.log_sensor(zone, "temperature", float(temp))
             if co2 is not None:
-                points.append(
-                    Point(SENSOR_MEASUREMENT)
-                    .tag("zone", zone)
-                    .tag("type", "co2")
-                    .field("value", float(co2))
-                )
+                ks.log_sensor(zone, "co2", float(co2))
             if nh3 is not None:
-                points.append(
-                    Point(SENSOR_MEASUREMENT)
-                    .tag("zone", zone)
-                    .tag("type", "ammonia")
-                    .field("value", float(nh3))
-                )
+                ks.log_sensor(zone, "ammonia", float(nh3))
 
         elif sensor_type == "feed_level":
             feed = data.get("feed_kg")
             if feed is not None:
-                points.append(
-                    Point(SENSOR_MEASUREMENT)
-                    .tag("zone", zone)
-                    .tag("type", "feed_level")
-                    .field("value", float(feed))
-                )
+                ks.log_sensor(zone, "feed_level", float(feed))
 
         elif sensor_type == "water_level":
             water = data.get("water_l")
             if water is not None:
-                points.append(
-                    Point(SENSOR_MEASUREMENT)
-                    .tag("zone", zone)
-                    .tag("type", "water_level")
-                    .field("value", float(water))
-                )
+                ks.log_sensor(zone, "water_level", float(water))
 
         elif sensor_type == "activity":
             activity = data.get("activity")
             if activity is not None:
-                points.append(
-                    Point(SENSOR_MEASUREMENT)
-                    .tag("zone", zone)
-                    .tag("type", "activity")
-                    .field("value", float(activity))
-                )
+                ks.log_sensor(zone, "activity", float(activity))
 
         else:
             print(f"[MONITOR] Unknown sensor type: {sensor_type}")
-            return
-
-        if points:
-            write_api.write(bucket=INFLUX_BUCKET, record=points)
-            print(f"[MONITOR] Wrote {len(points)} points for zone={zone}, type={sensor_type}")
 
     mqtt_client.on_message = on_message
     mqtt_client.loop_forever()

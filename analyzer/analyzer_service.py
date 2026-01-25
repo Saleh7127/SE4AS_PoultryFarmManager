@@ -1,17 +1,11 @@
-import os
+# analyzer/analyzer_service.py
 import json
 import time
-from typing import Optional
 
-from influxdb_client import InfluxDBClient
-from influxdb_client.client.query_api import QueryApi
-
-from common.influx_utils import create_influx_client
 from common.mqtt_utils import create_mqtt_client
 from common.config import (
     FARM_ID,
     ZONE_ID,
-    SENSOR_MEASUREMENT,
     TEMP_MIN,
     TEMP_MAX,
     NH3_THRESHOLD,
@@ -20,34 +14,18 @@ from common.config import (
     ACTIVITY_MIN,
     CO2_MAX,
 )
+from common.knowledge import KnowledgeStore
 
-INFLUX_BUCKET = os.getenv("INFLUXDB_BUCKET")
-INFLUX_ORG = os.getenv("INFLUXDB_ORG")
 STATUS_INTERVAL_S = 5.0
 
-def _get_latest_value(query_api: QueryApi, zone: str, sensor_type: str, window: str = "-10m") -> Optional[float]:
-    flux = f'''
-from(bucket: "{INFLUX_BUCKET}")
-  |> range(start: {window})
-  |> filter(fn: (r) => r["_measurement"] == "{SENSOR_MEASUREMENT}")
-  |> filter(fn: (r) => r["zone"] == "{zone}")
-  |> filter(fn: (r) => r["type"] == "{sensor_type}")
-  |> sort(columns: ["_time"], desc: true)
-  |> limit(n: 1)
-'''
-    tables = query_api.query(flux, org=INFLUX_ORG)
-    for table in tables:
-        for record in table.records:
-            return float(record.get_value())
-    return None
 
-def build_status(query_api: QueryApi, zone: str) -> dict:
-    temp = _get_latest_value(query_api, zone, "temperature")
-    co2 = _get_latest_value(query_api, zone, "co2")
-    nh3 = _get_latest_value(query_api, zone, "ammonia")
-    feed = _get_latest_value(query_api, zone, "feed_level")
-    water = _get_latest_value(query_api, zone, "water_level")
-    activity = _get_latest_value(query_api, zone, "activity")
+def build_status(ks: KnowledgeStore, zone: str) -> dict:
+    temp = ks.get_latest_sensor_value(zone, "temperature")
+    co2 = ks.get_latest_sensor_value(zone, "co2")
+    nh3 = ks.get_latest_sensor_value(zone, "ammonia")
+    feed = ks.get_latest_sensor_value(zone, "feed_level")
+    water = ks.get_latest_sensor_value(zone, "water_level")
+    activity = ks.get_latest_sensor_value(zone, "activity")
 
     temp_ok = temp is not None and TEMP_MIN <= temp <= TEMP_MAX
     co2_ok = co2 is not None and co2 <= CO2_MAX
@@ -108,15 +86,15 @@ def build_status(query_api: QueryApi, zone: str) -> dict:
         "alert": alert_text,
     }
 
+
 def start_analyzer():
     print("[ANALYZER] Starting...")
-    influx: InfluxDBClient = create_influx_client()
-    query_api = influx.query_api()
+    ks = KnowledgeStore()
     mqtt_client = create_mqtt_client("analyzer")
 
     while True:
         try:
-            status = build_status(query_api, ZONE_ID)
+            status = build_status(ks, ZONE_ID)
             topic = f"{FARM_ID}/{ZONE_ID}/status"
             payload_str = json.dumps(status)
             mqtt_client.publish(topic, payload_str)
