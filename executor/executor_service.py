@@ -6,28 +6,37 @@ from common.mqtt_utils import create_mqtt_client
 from common.config import FARM_ID, ZONE_ID
 from common.knowledge import KnowledgeStore
 
-def _log_startup_off(ks: KnowledgeStore, mqtt_client) -> None:
-    zone = ZONE_ID
-    initial = [
-        ("fan", {"action": "SET", "level": 0}, "SET 0%", {"level": 0, "on": 0}),
-        ("heater", {"action": "SET", "level_pct": 0}, "SET 0%", {"level_pct": 0, "on": 0}),
-        ("inlet", {"action": "SET", "open_pct": 0}, "OPEN 0%", {"open_pct": 0, "on": 0}),
-        ("feed_dispenser", {"action": "OFF"}, "OFF", {"on": 0}),
-        ("water_valve", {"action": "OFF"}, "OFF", {"on": 0}),
-        ("light", {"action": "SET", "level_pct": 0}, "SET 0%", {"level_pct": 0, "on": 0}),
-    ]
 
-    for actuator, command, state_str, numeric in initial:
-        cmd_topic = f"{FARM_ID}/{zone}/cmd/{actuator}"
-        payload_str = json.dumps(command)
-        mqtt_client.publish(cmd_topic, payload_str)
-        ks.log_actuator_command(
-            zone=zone,
-            actuator=actuator,
-            state_str=state_str,
-            numeric_fields=numeric,
-            payload=payload_str,
-        )
+def _log_startup_off(ks: KnowledgeStore, mqtt_client) -> None:
+    from common.config import load_system_config
+    
+    config = load_system_config()
+    farms = config.get("farms", [])
+    
+    for farm in farms:
+        f_id = farm["id"]
+        for zone in farm.get("zones", []):
+            initial = [
+                ("fan", {"action": "SET", "level": 0}, "SET 0%", {"level": 0, "on": 0}),
+                ("heater", {"action": "SET", "level_pct": 0}, "SET 0%", {"level_pct": 0, "on": 0}),
+                ("inlet", {"action": "SET", "open_pct": 0}, "OPEN 0%", {"open_pct": 0, "on": 0}),
+                ("feed_dispenser", {"action": "OFF"}, "OFF", {"on": 0}),
+                ("water_valve", {"action": "OFF"}, "OFF", {"on": 0}),
+                ("light", {"action": "SET", "level_pct": 0}, "SET 0%", {"level_pct": 0, "on": 0}),
+            ]
+
+            for actuator, command, state_str, numeric in initial:
+                cmd_topic = f"{f_id}/{zone}/cmd/{actuator}"
+                payload_str = json.dumps(command)
+                mqtt_client.publish(cmd_topic, payload_str)
+                ks.log_actuator_command(
+                    zone=zone,
+                    actuator=actuator,
+                    state_str=state_str,
+                    numeric_fields=numeric,
+                    payload=payload_str,
+                    farm_id=f_id,
+                )
 
 def start_executor():
     print("[EXECUTOR] Starting...")
@@ -35,7 +44,7 @@ def start_executor():
     mqtt_client = create_mqtt_client("executor")
     _log_startup_off(ks, mqtt_client)
 
-    topic = f"{FARM_ID}/+/plan"
+    topic = "+/+/plan"
     mqtt_client.subscribe(topic)
     print(f"[EXECUTOR] Subscribed to {topic}")
 
@@ -47,10 +56,18 @@ def start_executor():
             print(f"[EXECUTOR] Invalid JSON on {msg.topic}")
             return
 
+        # Extract farm_id from topic or payload
+        parts = msg.topic.split("/")
+        if len(parts) == 3:
+             farm_id = parts[0]
+        else:
+             farm_id = plan.get("farm_id") # fallback if passed in payload
+
         zone = plan.get("zone")
         actions = plan.get("actions", [])
-        if not zone:
-            print("[EXECUTOR] Plan without zone, ignoring")
+        
+        if not zone or not farm_id:
+            print("[EXECUTOR] Plan without zone or farm_id, ignoring")
             return
 
         for action in actions:
@@ -59,7 +76,7 @@ def start_executor():
             if not actuator:
                 continue
 
-            cmd_topic = f"{FARM_ID}/{zone}/cmd/{actuator}"
+            cmd_topic = f"{farm_id}/{zone}/cmd/{actuator}"
             payload_str = json.dumps(command)
             mqtt_client.publish(cmd_topic, payload_str)
             print(f"[EXECUTOR] Sent command to {cmd_topic}: {payload_str}")
@@ -141,6 +158,7 @@ def start_executor():
                 state_str=state_str,
                 numeric_fields=numeric,
                 payload=payload_str,
+                farm_id=farm_id,
             )
 
     mqtt_client.on_message = on_message

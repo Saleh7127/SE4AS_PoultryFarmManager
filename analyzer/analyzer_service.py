@@ -19,13 +19,14 @@ from common.knowledge import KnowledgeStore
 STATUS_INTERVAL_S = 5.0
 
 
-def build_status(ks: KnowledgeStore, zone: str) -> dict:
-    temp = ks.get_latest_sensor_value(zone, "temperature")
-    co2 = ks.get_latest_sensor_value(zone, "co2")
-    nh3 = ks.get_latest_sensor_value(zone, "ammonia")
-    feed = ks.get_latest_sensor_value(zone, "feed_level")
-    water = ks.get_latest_sensor_value(zone, "water_level")
-    activity = ks.get_latest_sensor_value(zone, "activity")
+def build_status(ks: KnowledgeStore, farm_id: str, zone: str) -> dict:
+    # Pass farm_id to get_latest_sensor_value
+    temp = ks.get_latest_sensor_value(zone, "temperature", farm_id=farm_id)
+    co2 = ks.get_latest_sensor_value(zone, "co2", farm_id=farm_id)
+    nh3 = ks.get_latest_sensor_value(zone, "ammonia", farm_id=farm_id)
+    feed = ks.get_latest_sensor_value(zone, "feed_level", farm_id=farm_id)
+    water = ks.get_latest_sensor_value(zone, "water_level", farm_id=farm_id)
+    activity = ks.get_latest_sensor_value(zone, "activity", farm_id=farm_id)
 
     temp_ok = temp is not None and TEMP_MIN <= temp <= TEMP_MAX
     co2_ok = co2 is not None and co2 <= CO2_MAX
@@ -70,6 +71,7 @@ def build_status(ks: KnowledgeStore, zone: str) -> dict:
     alert_text = " & ".join(alerts) if alerts else "OK"
 
     return {
+        "farm_id": farm_id,
         "zone": zone,
         "temperature_c": temp,
         "co2_ppm": co2,
@@ -89,16 +91,43 @@ def build_status(ks: KnowledgeStore, zone: str) -> dict:
 
 def start_analyzer():
     print("[ANALYZER] Starting...")
+    from common.config import load_system_config
+    
     ks = KnowledgeStore()
     mqtt_client = create_mqtt_client("analyzer")
 
     while True:
-        try:
-            status = build_status(ks, ZONE_ID)
-            topic = f"{FARM_ID}/{ZONE_ID}/status"
-            payload_str = json.dumps(status)
-            mqtt_client.publish(topic, payload_str)
-            print(f"[ANALYZER] Published status to {topic}: {payload_str}")
-        except Exception as e:
-            print(f"[ANALYZER] Error during analysis: {e}")
+        # Reload config dynamically (simplistic approach)
+        system_config = load_system_config()
+        farms = system_config.get("farms", [])
+
+        for farm in farms:
+            f_id = farm["id"]
+            zones = farm.get("zones", [])
+            for z_id in zones:
+                try:
+                    status = build_status(ks, f_id, z_id)
+                    
+                    # Log symptoms to knowledge base
+                    ks.log_symptom(
+                        zone=z_id,
+                        farm_id=f_id,
+                        symptoms={
+                            "temp_ok": status["temp_ok"],
+                            "co2_ok": status["co2_ok"],
+                            "nh3_ok": status["nh3_ok"],
+                            "feed_ok": status["feed_ok"],
+                            "water_ok": status["water_ok"],
+                            "activity_ok": status["activity_ok"],
+                            "alert": status["alert"],
+                        }
+                    )
+                    
+                    topic = f"{f_id}/{z_id}/status"
+                    payload_str = json.dumps(status)
+                    mqtt_client.publish(topic, payload_str)
+                    print(f"[ANALYZER] Published status to {topic}: {payload_str}")
+                except Exception as e:
+                    print(f"[ANALYZER] Error during analysis for {f_id}/{z_id}: {e}")
+        
         time.sleep(STATUS_INTERVAL_S)

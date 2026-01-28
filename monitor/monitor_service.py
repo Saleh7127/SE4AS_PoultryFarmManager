@@ -8,7 +8,9 @@ def start_monitor():
     ks = KnowledgeStore()
     mqtt_client = create_mqtt_client("monitor")
 
-    topic = f"{FARM_ID}/+/sensors/+"
+    # Subscribe to all farms, all zones (wildcard)
+    # Topic format: {farm_id}/{zone_id}/sensors/{sensor_type}
+    topic = "+/+/sensors/+"
     print(f"[MONITOR] Subscribing to {topic}")
     mqtt_client.subscribe(topic)
 
@@ -24,33 +26,33 @@ def start_monitor():
             print(f"[MONITOR] Unexpected topic structure: {msg.topic}")
             return
 
-        _, zone, _, sensor_type = parts
+        farm_id, zone, _, sensor_type = parts
 
         if sensor_type == "air":
             temp = data.get("temperature_c")
             co2 = data.get("co2_ppm")
             nh3 = data.get("nh3_ppm")
             if temp is not None:
-                ks.log_sensor(zone, "temperature", float(temp))
+                ks.log_sensor(zone, "temperature", float(temp), farm_id=farm_id)
             if co2 is not None:
-                ks.log_sensor(zone, "co2", float(co2))
+                ks.log_sensor(zone, "co2", float(co2), farm_id=farm_id)
             if nh3 is not None:
-                ks.log_sensor(zone, "ammonia", float(nh3))
+                ks.log_sensor(zone, "ammonia", float(nh3), farm_id=farm_id)
 
         elif sensor_type == "feed_level":
             feed = data.get("feed_kg")
             if feed is not None:
-                ks.log_sensor(zone, "feed_level", float(feed))
+                ks.log_sensor(zone, "feed_level", float(feed), farm_id=farm_id)
 
         elif sensor_type == "water_level":
             water = data.get("water_l")
             if water is not None:
-                ks.log_sensor(zone, "water_level", float(water))
+                ks.log_sensor(zone, "water_level", float(water), farm_id=farm_id)
 
         elif sensor_type == "activity":
             activity = data.get("activity")
             if activity is not None:
-                ks.log_sensor(zone, "activity", float(activity))
+                ks.log_sensor(zone, "activity", float(activity), farm_id=farm_id)
 
         else:
             print(f"[MONITOR] Unknown sensor type: {sensor_type}")

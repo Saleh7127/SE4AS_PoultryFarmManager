@@ -8,3 +8,4 @@ plugins/
 csv/
 pdf/
 png/
+__pycache__/

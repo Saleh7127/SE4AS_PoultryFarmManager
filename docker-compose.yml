@@ -80,6 +80,8 @@ services:
     env_file: .env
     depends_on:
       - mqtt
+    volumes:
+      - ./system_config.json:/app/system_config.json
     networks:
       - farm-net
     restart: unless-stopped
@@ -96,6 +98,8 @@ services:
     depends_on:
       - mqtt
       - influxdb
+    volumes:
+      - ./system_config.json:/app/system_config.json
     networks:
       - farm-net
     restart: unless-stopped
@@ -111,6 +115,8 @@ services:
     env_file: .env
     depends_on:
       - influxdb
+    volumes:
+      - ./system_config.json:/app/system_config.json
     networks:
       - farm-net
     restart: unless-stopped
@@ -126,6 +132,8 @@ services:
     env_file: .env
     depends_on:
       - mqtt
+    volumes:
+      - ./system_config.json:/app/system_config.json
     networks:
       - farm-net
     restart: unless-stopped
@@ -142,6 +150,8 @@ services:
     depends_on:
       - mqtt
       - influxdb
+    volumes:
+      - ./system_config.json:/app/system_config.json
     networks:
       - farm-net
     restart: unless-stopped

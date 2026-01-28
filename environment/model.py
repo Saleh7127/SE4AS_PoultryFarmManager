@@ -156,6 +156,10 @@ class EnvironmentState:
     # internal time for demo behavior
     sim_time_s: float = 0.0
 
+    # Physical config (overridable)
+    bird_count: int = BIRD_COUNT
+    barn_volume_m3: float = BARN_VOLUME_M3
+
 
 def _outside_temp(sim_time_s: float) -> float:
     if USE_HOST_TIME:
@@ -307,13 +311,13 @@ def step(state: EnvironmentState, dt_s: float) -> None:
     # 3. TEMPERATURE DYNAMICS
     # --------------------------
     outside_temp = _outside_temp(state.sim_time_s)
-    heat_capacity_j_per_k = AIR_DENSITY * AIR_CP * BARN_VOLUME_M3 * THERMAL_MASS_FACTOR
+    heat_capacity_j_per_k = AIR_DENSITY * AIR_CP * state.barn_volume_m3 * THERMAL_MASS_FACTOR
 
     q_loss = BARN_UA_W_PER_K * (state.temperature_c - outside_temp)
     q_vent = AIR_DENSITY * AIR_CP * flow_m3_s * (state.temperature_c - outside_temp)
     q_heater = HEATER_POWER_W * (state.heater_level / 100.0)
 
-    bird_heat_w = BIRD_COUNT * (BIRD_HEAT_W_BASE + BIRD_HEAT_W_ACTIVITY * state.activity)
+    bird_heat_w = state.bird_count * (BIRD_HEAT_W_BASE + BIRD_HEAT_W_ACTIVITY * state.activity)
 
     dtemp = (q_heater + bird_heat_w - q_loss - q_vent) / heat_capacity_j_per_k
     state.temperature_c = _clamp(state.temperature_c + dtemp * dt_s, 10.0, 40.0)
@@ -322,9 +326,9 @@ def step(state: EnvironmentState, dt_s: float) -> None:
     # 4. CO2 DYNAMICS (mass balance)
     # --------------------------
     co2_lps = CO2_LPS_PER_BIRD * (1.0 + CO2_ACTIVITY_MULT * state.activity)
-    co2_m3_s = (co2_lps * BIRD_COUNT) / 1000.0
-    co2_gen_ppm_s = (co2_m3_s / BARN_VOLUME_M3) * 1.0e6
-    co2_vent_ppm_s = (flow_m3_s / BARN_VOLUME_M3) * (OUTSIDE_CO2_PPM - state.co2_ppm)
+    co2_m3_s = (co2_lps * state.bird_count) / 1000.0
+    co2_gen_ppm_s = (co2_m3_s / state.barn_volume_m3) * 1.0e6
+    co2_vent_ppm_s = (flow_m3_s / state.barn_volume_m3) * (OUTSIDE_CO2_PPM - state.co2_ppm)
 
     state.co2_ppm += (co2_gen_ppm_s + co2_vent_ppm_s) * dt_s
     state.co2_ppm = _clamp(state.co2_ppm, 400.0, 6000.0)
@@ -335,14 +339,14 @@ def step(state: EnvironmentState, dt_s: float) -> None:
     temp_factor = max(0.0, state.temperature_c - 20.0)
     nh3_mg_s = (
         NH3_MG_S_PER_BIRD
-        * BIRD_COUNT
+        * state.bird_count
         * (1.0 + NH3_ACTIVITY_MULT * state.activity)
         * (1.0 + NH3_TEMP_COEFF * temp_factor)
     )
 
     # Convert mg/s to ppm/s: ppm = mg/m3 * (24.45 / 17.0)
-    nh3_ppm_gen_s = (nh3_mg_s / BARN_VOLUME_M3) * (24.45 / 17.0)
-    nh3_vent_ppm_s = (flow_m3_s / BARN_VOLUME_M3) * (0.0 - state.nh3_ppm)
+    nh3_ppm_gen_s = (nh3_mg_s / state.barn_volume_m3) * (24.45 / 17.0)
+    nh3_vent_ppm_s = (flow_m3_s / state.barn_volume_m3) * (0.0 - state.nh3_ppm)
     nh3_decay_ppm_s = -NH3_DECAY_PER_S * state.nh3_ppm
 
     state.nh3_ppm += (nh3_ppm_gen_s + nh3_vent_ppm_s + nh3_decay_ppm_s) * dt_s
@@ -352,7 +356,7 @@ def step(state: EnvironmentState, dt_s: float) -> None:
     # 6. FEED & WATER DYNAMICS
     # --------------------------
     feed_kg_s = (FEED_G_PER_BIRD_DAY / 1000.0) / 86400.0
-    feed_rate = BIRD_COUNT * feed_kg_s * (0.6 + FEED_ACTIVITY_MULT * state.activity)
+    feed_rate = state.bird_count * feed_kg_s * (0.6 + FEED_ACTIVITY_MULT * state.activity)
     if state.temperature_c > 28.0:
         feed_rate *= 0.9
     if state.temperature_c < 18.0:
@@ -370,7 +374,7 @@ def step(state: EnvironmentState, dt_s: float) -> None:
         )
 
     water_l_s = WATER_L_PER_BIRD_DAY / 86400.0
-    water_rate = BIRD_COUNT * water_l_s * (0.7 + WATER_ACTIVITY_MULT * state.activity)
+    water_rate = state.bird_count * water_l_s * (0.7 + WATER_ACTIVITY_MULT * state.activity)
     if state.temperature_c > 26.0:
         water_rate *= 1.2
     if state.temperature_c < 18.0:

@@ -23,6 +23,7 @@ from common.config import (
     HEATER_MIN_FAN,
 )
 from common.models import Action, Plan
+from common.knowledge import KnowledgeStore
 
 HEATER_KP_TEMP = float(os.getenv("HEATER_KP_TEMP", "25.0"))
 HEATER_DEADBAND_C = float(os.getenv("HEATER_DEADBAND_C", "0.4"))
@@ -57,8 +58,8 @@ _HEATER_STATE: Dict[str, bool] = {}
 _HEATER_SWITCH_TS: Dict[str, float] = {}
 
 
-def _rate_limit(zone: str, actuator: str, target: float, max_rate_per_min: float) -> float:
-    key = (zone, actuator)
+def _rate_limit(farm_id: str, zone: str, actuator: str, target: float, max_rate_per_min: float) -> float:
+    key = (farm_id, zone, actuator)
     now = time.time()
     prev = _LAST_LEVELS.get(key, target)
     prev_ts = _LAST_TS.get(key, now)
@@ -76,13 +77,14 @@ def _rate_limit(zone: str, actuator: str, target: float, max_rate_per_min: float
 
 
 def _hysteresis_state(
+    farm_id: str,
     zone: str,
     actuator: str,
     value: Optional[float],
     low: float,
     high: float,
 ) -> bool:
-    key = (zone, actuator)
+    key = (farm_id, zone, actuator)
     state = _REFILL_STATE.get(key, False)
     if value is None:
         return state
@@ -94,10 +96,11 @@ def _hysteresis_state(
     return state
 
 
-def _heater_on_state(zone: str, temp: Optional[float]) -> bool:
+def _heater_on_state(farm_id: str, zone: str, temp: Optional[float]) -> bool:
     now = time.time()
-    last_state = _HEATER_STATE.get(zone, False)
-    last_switch = _HEATER_SWITCH_TS.get(zone, now)
+    key = f"{farm_id}/{zone}"
+    last_state = _HEATER_STATE.get(key, False)
+    last_switch = _HEATER_SWITCH_TS.get(key, now)
 
     if last_state:
         if temp >= TEMP_SETPOINT + HEATER_DEADBAND_C:
@@ -110,12 +113,13 @@ def _heater_on_state(zone: str, temp: Optional[float]) -> bool:
                 last_state = True
                 last_switch = now
 
-    _HEATER_STATE[zone] = last_state
-    _HEATER_SWITCH_TS[zone] = last_switch
+    _HEATER_STATE[key] = last_state
+    _HEATER_SWITCH_TS[key] = last_switch
     return last_state
 
 
 def _build_actions_from_status(status: dict) -> List[Action]:
+    farm_id = status.get("farm_id", "unknown")
     zone = status.get("zone", "unknown")
     actions: List[Action] = []
 
@@ -159,7 +163,7 @@ def _build_actions_from_status(status: dict) -> List[Action]:
     # ===============================
     heater_level: Optional[float] = None
     if temp is not None:
-        heater_on = _heater_on_state(zone, temp)
+        heater_on = _heater_on_state(farm_id, zone, temp)
         if heater_on:
             temp_deficit = max(0.0, TEMP_SETPOINT - temp)
             heater_level = min(100.0, HEATER_KP_TEMP * temp_deficit)
@@ -167,7 +171,7 @@ def _build_actions_from_status(status: dict) -> List[Action]:
                 heater_level = HEATER_MIN_LEVEL
         else:
             heater_level = 0.0
-        heater_level = _rate_limit(zone, "heater", heater_level, HEATER_RATE_LIMIT_PER_MIN)
+        heater_level = _rate_limit(farm_id, zone, "heater", heater_level, HEATER_RATE_LIMIT_PER_MIN)
 
     # If heater is ON, keep at least some fan
     if heater_level is not None and heater_level > 0.0 and fan_level is not None:
@@ -183,7 +187,7 @@ def _build_actions_from_status(status: dict) -> List[Action]:
             fan_level = min(fan_level, FAN_COLD_MAX_PCT)
 
     if fan_level is not None:
-        fan_level = _rate_limit(zone, "fan", fan_level, FAN_RATE_LIMIT_PER_MIN)
+        fan_level = _rate_limit(farm_id, zone, "fan", fan_level, FAN_RATE_LIMIT_PER_MIN)
         actions.append(
             Action(
                 actuator="fan",
@@ -204,8 +208,8 @@ def _build_actions_from_status(status: dict) -> List[Action]:
     # ===============================
     # 3) FEED & WATER (HYSTERESIS REFILL)
     # ===============================
-    feed_refill_on = _hysteresis_state(zone, "feed", feed, FEED_REFILL_LOW_KG, FEED_REFILL_HIGH_KG)
-    water_refill_on = _hysteresis_state(zone, "water", water, WATER_REFILL_LOW_L, WATER_REFILL_HIGH_L)
+    feed_refill_on = _hysteresis_state(farm_id, zone, "feed", feed, FEED_REFILL_LOW_KG, FEED_REFILL_HIGH_KG)
+    water_refill_on = _hysteresis_state(farm_id, zone, "water", water, WATER_REFILL_LOW_L, WATER_REFILL_HIGH_L)
 
     actions.append(
         Action(
@@ -243,7 +247,7 @@ def _build_actions_from_status(status: dict) -> List[Action]:
             inlet_open = min(inlet_open, INLET_COLD_MAX_PCT)
 
     if inlet_open is not None:
-        inlet_open = _rate_limit(zone, "inlet", inlet_open, INLET_RATE_LIMIT_PER_MIN)
+        inlet_open = _rate_limit(farm_id, zone, "inlet", inlet_open, INLET_RATE_LIMIT_PER_MIN)
         actions.append(
             Action(
                 actuator="inlet",
@@ -271,7 +275,7 @@ def _build_actions_from_status(status: dict) -> List[Action]:
         light_level = min_light
 
     if light_level is not None:
-        light_level = _rate_limit(zone, "light", light_level, LIGHT_RATE_LIMIT_PER_MIN)
+        light_level = _rate_limit(farm_id, zone, "light", light_level, LIGHT_RATE_LIMIT_PER_MIN)
         actions.append(
             Action(
                 actuator="light",
@@ -287,8 +291,10 @@ def _build_actions_from_status(status: dict) -> List[Action]:
 def start_planner():
     print("[PLANNER] Starting...")
     mqtt_client = create_mqtt_client("planner")
+    ks = KnowledgeStore()
 
-    topic = f"{FARM_ID}/+/status"
+    # Subscribe to status from all farms and zones
+    topic = "+/+/status"
     mqtt_client.subscribe(topic)
     print(f"[PLANNER] Subscribed to {topic}")
 
@@ -300,19 +306,27 @@ def start_planner():
             print(f"[PLANNER] Invalid JSON on {msg.topic}")
             return
 
-        zone = status.get("zone")
+        # Extract farm and zone from topic
+        parts = msg.topic.split("/")
+        if len(parts) != 3:
+            print(f"[PLANNER] Unexpected topic format: {msg.topic}")
+            return
+        
+        farm_id, zone, _ = parts
+
         if not zone:
             print("[PLANNER] Status without zone, ignoring")
             return
 
         actions = _build_actions_from_status(status)
         if not actions:
-            print(f"[PLANNER] No actions needed for zone={zone}")
+            print(f"[PLANNER] No actions needed for {farm_id}/{zone}")
             return
 
         plan = Plan(zone=zone, actions=actions)
-        plan_topic = f"{FARM_ID}/{zone}/plan"
+        plan_topic = f"{farm_id}/{zone}/plan"
         payload = {
+            "farm_id": farm_id,
             "zone": plan.zone,
             "actions": [
                 {"actuator": a.actuator, "priority": a.priority, "command": a.command}
@@ -320,8 +334,19 @@ def start_planner():
             ],
         }
 
+
         mqtt_client.publish(plan_topic, json.dumps(payload))
         print(f"[PLANNER] Published plan to {plan_topic}: {payload}")
+        
+        # Log plan to Knowledge Base
+        try:
+             ks.log_plan(
+                 zone=zone,
+                 farm_id=farm_id,
+                 plan_actions=payload["actions"]
+             )
+        except Exception as e:
+             print(f"[PLANNER] Failed to log plan to KB: {e}")
 
     mqtt_client.on_message = on_message
     mqtt_client.loop_forever()

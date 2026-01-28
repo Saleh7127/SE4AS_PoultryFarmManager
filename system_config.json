@@ -1,0 +1,21 @@
+{
+    "farms": [
+        {
+            "id": "farm1",
+            "zones": [
+                "zone1"
+            ]
+        },
+        {
+            "id": "farm2",
+            "zones": [
+                "zone1",
+                "zone2"
+            ],
+            "config": {
+                "bird_count": 5000,
+                "barn_volume_m3": 1200.0
+            }
+        }
+    ]
+}

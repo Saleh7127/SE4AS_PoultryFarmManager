@@ -38,7 +38,20 @@ LUX_DAY_MIN = float(os.getenv("LUX_DAY_MIN", 40))  # demo: slightly lower so lig
 # --- MEASUREMENTS NAMES ---
 SENSOR_MEASUREMENT = "sensors"
 ACTUATOR_MEASUREMENT = "actuator_commands"
+SYMPTOM_MEASUREMENT = "symptoms"
+PLAN_MEASUREMENT = "plans"
 
 # Influx defaults (env can override)
 INFLUXDB_BUCKET = os.getenv("INFLUXDB_BUCKET", "farm-bucket")
 INFLUXDB_ORG = os.getenv("INFLUXDB_ORG", "farm-org")
+
+# --- DYNAMIC CONFIG ---
+import json
+
+def load_system_config(path="system_config.json"):
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading system config from {path}: {e}")
+        return {"farms": [{"id": FARM_ID, "zones": [ZONE_ID]}]}
