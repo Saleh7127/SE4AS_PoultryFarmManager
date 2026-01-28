@@ -1,21 +1,31 @@
 import json
+import os
 import threading
 import time
 
 import paho.mqtt.client as mqtt
 
 from common.config import FARM_ID, ZONE_ID
-from environment.model import EnvironmentState, step
+from environment.model import (
+    EnvironmentState,
+    step,
+    STARTUP_OVERRIDE_S,
+    FEED_REFILL_FLOW_KG_S,
+    WATER_REFILL_FLOW_L_S,
+)
 
 MQTT_HOST = "mqtt"
 MQTT_PORT = 1883
 MQTT_USER = "admin"
 MQTT_PASSWORD = "admin"
+SENSOR_INTERVAL_S = float(os.getenv("SENSOR_INTERVAL_S", 5.0))
+SIM_STEP_S = float(os.getenv("SIM_STEP_S", SENSOR_INTERVAL_S))
+AUTO_CONTROL = os.getenv("AUTO_CONTROL", "true").lower() in {"1", "true", "yes"}
 
 
 class EnvSimulator:
     def __init__(self):
-        self.state = EnvironmentState()
+        self.state = EnvironmentState(auto_control=AUTO_CONTROL)
         self._lock = threading.Lock()
         self.client = mqtt.Client(client_id="environment")
         self.client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
@@ -27,32 +37,6 @@ class EnvSimulator:
         print(f"[ENV] Subscribing to {cmd_topic}")
         self.client.subscribe(cmd_topic)
         self.client.loop_start()
-    
-    def _set_heater(self, turn_on: bool):
-        s = self.state
-        MIN_HEATER_ON_S = 120.0   # 2 minutes
-        MIN_HEATER_OFF_S = 120.0  # 2 minutes
-
-        now = s.sim_time_s
-
-        # Allow first switch immediately
-        if s.heater_last_switch_s == 0.0 and not s.heater_on and turn_on:
-            s.heater_on = True
-            s.heater_last_switch_s = now
-            return
-
-        elapsed = now - s.heater_last_switch_s
-
-        if turn_on:
-            # Currently OFF -> can we turn ON?
-            if (not s.heater_on) and (elapsed >= MIN_HEATER_OFF_S):
-                s.heater_on = True
-                s.heater_last_switch_s = now
-        else:
-            # Currently ON -> can we turn OFF?
-            if s.heater_on and (elapsed >= MIN_HEATER_ON_S):
-                s.heater_on = False
-                s.heater_last_switch_s = now
 
 
     def _on_message(self, client, userdata, msg):
@@ -68,37 +52,60 @@ class EnvSimulator:
 
     def apply_command(self, actuator: str, data: dict):
         s = self.state
+        if s.sim_time_s < STARTUP_OVERRIDE_S:
+            return
 
         if actuator == "fan":
             level = float(data.get("level", 0.0))
-            self.state.fan_level_command = max(0.0, min(100.0, level))
+            s.fan_level_command = max(0.0, min(100.0, level))
+            s.fan_cmd_last_s = s.sim_time_s
 
 
         elif actuator == "heater":
-            action = data.get("action", "").upper()
-            if action == "ON":
-                self._set_heater(True)
-            elif action == "OFF":
-                self._set_heater(False)
+            if "level_pct" in data:
+                level_pct = float(data.get("level_pct", 0.0))
+                s.heater_level_command = max(0.0, min(100.0, level_pct))
+                s.heater_cmd_last_s = s.sim_time_s
+            else:
+                action = data.get("action", "").upper()
+                if action in {"ON", "OFF"}:
+                    s.heater_level_command = 100.0 if action == "ON" else 0.0
+                    s.heater_cmd_last_s = s.sim_time_s
 
 
         elif actuator == "inlet":
             open_pct = float(data.get("open_pct", 0.0))
-            s.inlet_open_pct = max(0.0, min(100.0, open_pct))
+            s.inlet_open_pct_command = max(0.0, min(100.0, open_pct))
+            s.inlet_cmd_last_s = s.sim_time_s
 
         elif actuator == "feed_dispenser":
-            amount_g = float(data.get("amount_g", 0.0))
-            s.feed_kg += max(0.0, amount_g) / 1000.0
+            action = data.get("action", "").upper()
+            if "on" in data or action in {"ON", "OFF"}:
+                on = data.get("on")
+                if on is None:
+                    on = action == "ON"
+                s.feed_refill_on = bool(on)
+            else:
+                amount_g = float(data.get("amount_g", 0.0))
+                amount_kg = max(0.0, amount_g) / 1000.0
+                if amount_kg > 0.0 and FEED_REFILL_FLOW_KG_S > 0.0:
+                    s.feed_refill_remaining_s = amount_kg / FEED_REFILL_FLOW_KG_S
 
         elif actuator == "water_valve":
-            duration_s = float(data.get("duration_s", 0.0))
-            duration_s = max(0.0, duration_s)
-            refill_l = 0.02 * duration_s   # 0.02 L/s --> 0.3L in 15s
-            s.water_l += refill_l
+            action = data.get("action", "").upper()
+            if "on" in data or action in {"ON", "OFF"}:
+                on = data.get("on")
+                if on is None:
+                    on = action == "ON"
+                s.water_refill_on = bool(on)
+            else:
+                duration_s = float(data.get("duration_s", 0.0))
+                s.water_refill_remaining_s = max(0.0, duration_s)
 
         elif actuator == "light":
             level_pct = float(data.get("level_pct", 0.0))
-            s.light_level_pct = max(0.0, min(100.0, level_pct))
+            s.light_level_pct_command = max(0.0, min(100.0, level_pct))
+            s.light_cmd_last_s = s.sim_time_s
 
     def tick(self, dt_s: float):
         with self._lock:
@@ -115,5 +122,5 @@ def run_environment_loop():
     sim.connect()
 
     while True:
-        sim.tick(1.0)  # 1 second per step
-        time.sleep(1.0)
+        sim.tick(SIM_STEP_S)
+        time.sleep(SENSOR_INTERVAL_S)

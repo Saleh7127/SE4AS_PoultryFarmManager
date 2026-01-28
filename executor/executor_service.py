@@ -3,13 +3,37 @@ import os
 import json
 
 from common.mqtt_utils import create_mqtt_client
-from common.config import FARM_ID
+from common.config import FARM_ID, ZONE_ID
 from common.knowledge import KnowledgeStore
+
+def _log_startup_off(ks: KnowledgeStore, mqtt_client) -> None:
+    zone = ZONE_ID
+    initial = [
+        ("fan", {"action": "SET", "level": 0}, "SET 0%", {"level": 0, "on": 0}),
+        ("heater", {"action": "SET", "level_pct": 0}, "SET 0%", {"level_pct": 0, "on": 0}),
+        ("inlet", {"action": "SET", "open_pct": 0}, "OPEN 0%", {"open_pct": 0, "on": 0}),
+        ("feed_dispenser", {"action": "OFF"}, "OFF", {"on": 0}),
+        ("water_valve", {"action": "OFF"}, "OFF", {"on": 0}),
+        ("light", {"action": "SET", "level_pct": 0}, "SET 0%", {"level_pct": 0, "on": 0}),
+    ]
+
+    for actuator, command, state_str, numeric in initial:
+        cmd_topic = f"{FARM_ID}/{zone}/cmd/{actuator}"
+        payload_str = json.dumps(command)
+        mqtt_client.publish(cmd_topic, payload_str)
+        ks.log_actuator_command(
+            zone=zone,
+            actuator=actuator,
+            state_str=state_str,
+            numeric_fields=numeric,
+            payload=payload_str,
+        )
 
 def start_executor():
     print("[EXECUTOR] Starting...")
     ks = KnowledgeStore()
     mqtt_client = create_mqtt_client("executor")
+    _log_startup_off(ks, mqtt_client)
 
     topic = f"{FARM_ID}/+/plan"
     mqtt_client.subscribe(topic)
@@ -50,9 +74,18 @@ def start_executor():
                 numeric = {"level": level, "on": 1 if level > 0 else 0}
 
             elif actuator == "heater":
-                action_str = command.get("action", "").upper()
-                state_str = action_str or "OFF"
-                numeric = {"on": 1 if action_str == "ON" else 0}
+                if "level_pct" in command:
+                    level_pct = int(command.get("level_pct", 0))
+                    state_str = f"SET {level_pct}%"
+                    numeric = {"level_pct": level_pct, "on": 1 if level_pct > 0 else 0}
+                else:
+                    action_str = command.get("action", "").upper()
+                    if action_str == "ON":
+                        state_str = "SET 100%"
+                        numeric = {"level_pct": 100, "on": 1}
+                    else:
+                        state_str = "SET 0%"
+                        numeric = {"level_pct": 0, "on": 0}
 
             elif actuator == "inlet":
                 open_pct = int(command.get("open_pct", 0))
@@ -63,20 +96,36 @@ def start_executor():
                 }
 
             elif actuator == "feed_dispenser":
-                amount_g = int(command.get("amount_g", 0))
-                state_str = f"DISPENSE {amount_g}g"
-                numeric = {
-                    "amount_g": amount_g,
-                    "on": 1 if amount_g > 0 else 0,
-                }
+                action_str = command.get("action", "").upper()
+                if action_str in {"ON", "OFF"} or "on" in command:
+                    on = command.get("on")
+                    if on is None:
+                        on = action_str == "ON"
+                    state_str = "ON" if on else "OFF"
+                    numeric = {"on": 1 if on else 0}
+                else:
+                    amount_g = int(command.get("amount_g", 0))
+                    state_str = f"DISPENSE {amount_g}g"
+                    numeric = {
+                        "amount_g": amount_g,
+                        "on": 1 if amount_g > 0 else 0,
+                    }
 
             elif actuator == "water_valve":
-                duration_s = int(command.get("duration_s", 0))
-                state_str = f"OPEN {duration_s}s"
-                numeric = {
-                    "duration_s": duration_s,
-                    "on": 1 if duration_s > 0 else 0,
-                }
+                action_str = command.get("action", "").upper()
+                if action_str in {"ON", "OFF"} or "on" in command:
+                    on = command.get("on")
+                    if on is None:
+                        on = action_str == "ON"
+                    state_str = "ON" if on else "OFF"
+                    numeric = {"on": 1 if on else 0}
+                else:
+                    duration_s = int(command.get("duration_s", 0))
+                    state_str = f"OPEN {duration_s}s"
+                    numeric = {
+                        "duration_s": duration_s,
+                        "on": 1 if duration_s > 0 else 0,
+                    }
 
             elif actuator == "light":
                 level_pct = int(command.get("level_pct", 0))
