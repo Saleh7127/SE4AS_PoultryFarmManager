@@ -4,52 +4,12 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 from common.mqtt_utils import create_mqtt_client
-from common.config import (
-    FARM_ID,
-    TEMP_MIN,
-    TEMP_MAX,
-    NH3_THRESHOLD,
-    FEED_THRESHOLD,
-    WATER_THRESHOLD,
-    ACTIVITY_MIN,
-    CO2_MAX,
-    LUX_DAY_MIN,
-    TEMP_SETPOINT,
-    CO2_SETPOINT,
-    FAN_KP_TEMP,
-    FAN_KP_CO2,
-    FAN_MAX,
-    FAN_MIN,
-    HEATER_MIN_FAN,
-)
+from common.config import get_config, load_system_config
 from common.models import Action, Plan
 from common.knowledge import KnowledgeStore
 
-HEATER_KP_TEMP = float(os.getenv("HEATER_KP_TEMP", "25.0"))
-HEATER_DEADBAND_C = float(os.getenv("HEATER_DEADBAND_C", "0.4"))
-HEATER_MIN_ON_S = float(os.getenv("HEATER_MIN_ON_S", "120.0"))
-HEATER_MIN_OFF_S = float(os.getenv("HEATER_MIN_OFF_S", "120.0"))
-HEATER_MIN_LEVEL = float(os.getenv("HEATER_MIN_LEVEL", "10.0"))
-LIGHT_ACTIVITY_HIGH = float(os.getenv("LIGHT_ACTIVITY_HIGH", "0.85"))
-FAN_MIN_VENT_PCT = float(os.getenv("FAN_MIN_VENT_PCT", "15.0"))
-INLET_MIN_PCT = float(os.getenv("INLET_MIN_PCT", "10.0"))
-FAN_COLD_MAX_PCT = float(os.getenv("FAN_COLD_MAX_PCT", "35.0"))
-INLET_COLD_MAX_PCT = float(os.getenv("INLET_COLD_MAX_PCT", "50.0"))
-COLD_VENT_DELTA_C = float(os.getenv("COLD_VENT_DELTA_C", "0.6"))
-LIGHT_MIN_DAY_PCT = float(os.getenv("LIGHT_MIN_DAY_PCT", "30.0"))
-LIGHT_MIN_NIGHT_PCT = float(os.getenv("LIGHT_MIN_NIGHT_PCT", "5.0"))
-LIGHTS_ON_H = float(os.getenv("LIGHTS_ON_H", "6.0"))
-LIGHTS_OFF_H = float(os.getenv("LIGHTS_OFF_H", "22.0"))
-
-FAN_RATE_LIMIT_PER_MIN = float(os.getenv("FAN_RATE_LIMIT_PER_MIN", "80.0"))
-HEATER_RATE_LIMIT_PER_MIN = float(os.getenv("HEATER_RATE_LIMIT_PER_MIN", "100.0"))
-INLET_RATE_LIMIT_PER_MIN = float(os.getenv("INLET_RATE_LIMIT_PER_MIN", "120.0"))
-LIGHT_RATE_LIMIT_PER_MIN = float(os.getenv("LIGHT_RATE_LIMIT_PER_MIN", "150.0"))
-
-FEED_REFILL_LOW_KG = float(os.getenv("FEED_REFILL_LOW_KG", FEED_THRESHOLD))
-FEED_REFILL_HIGH_KG = float(os.getenv("FEED_REFILL_HIGH_KG", FEED_THRESHOLD + 1.0))
-WATER_REFILL_LOW_L = float(os.getenv("WATER_REFILL_LOW_L", WATER_THRESHOLD))
-WATER_REFILL_HIGH_L = float(os.getenv("WATER_REFILL_HIGH_L", WATER_THRESHOLD + 0.5))
+# Helper to avoid importing too many constants if we can look them up dynamically
+# We will use get_config for everything.
 
 _LAST_LEVELS: Dict[Tuple[str, str], float] = {}
 _LAST_TS: Dict[Tuple[str, str], float] = {}
@@ -96,20 +56,20 @@ def _hysteresis_state(
     return state
 
 
-def _heater_on_state(farm_id: str, zone: str, temp: Optional[float]) -> bool:
+def _heater_on_state(farm_id: str, zone: str, temp: Optional[float], setpoint: float, deadband: float, min_on_s: float, min_off_s: float) -> bool:
     now = time.time()
     key = f"{farm_id}/{zone}"
     last_state = _HEATER_STATE.get(key, False)
     last_switch = _HEATER_SWITCH_TS.get(key, now)
 
     if last_state:
-        if temp >= TEMP_SETPOINT + HEATER_DEADBAND_C:
-            if now - last_switch >= HEATER_MIN_ON_S:
+        if temp >= setpoint + deadband:
+            if now - last_switch >= min_on_s:
                 last_state = False
                 last_switch = now
     else:
-        if temp is not None and temp <= TEMP_SETPOINT - HEATER_DEADBAND_C:
-            if now - last_switch >= HEATER_MIN_OFF_S:
+        if temp is not None and temp <= setpoint - deadband:
+            if now - last_switch >= min_off_s:
                 last_state = True
                 last_switch = now
 
@@ -118,10 +78,59 @@ def _heater_on_state(farm_id: str, zone: str, temp: Optional[float]) -> bool:
     return last_state
 
 
-def _build_actions_from_status(status: dict) -> List[Action]:
+def _build_actions_from_status(status: dict, sys_config: dict) -> List[Action]:
     farm_id = status.get("farm_id", "unknown")
     zone = status.get("zone", "unknown")
     actions: List[Action] = []
+
+    # Helper for config lookup
+    def cfg(key, default=None):
+        return get_config(key, sys_config, farm_id, zone, default)
+
+    # Load Params
+    TEMP_SETPOINT = float(cfg("temp_setpoint", 26.0))
+    CO2_SETPOINT = float(cfg("co2_setpoint", 1500.0))
+    NH3_THRESHOLD = float(cfg("nh3_threshold", 25.0))
+    CO2_MAX = float(cfg("co2_max", 3000.0))
+    
+    FAN_KP_TEMP = float(cfg("fan_kp_temp", 10.0))
+    FAN_KP_CO2 = float(cfg("fan_kp_co2", 0.02))
+    FAN_MAX = float(cfg("fan_max", 100.0))
+    FAN_MIN = float(cfg("fan_min", 0.0))
+    
+    HEATER_KP_TEMP = float(cfg("heater_kp_temp", 25.0))
+    HEATER_DEADBAND_C = float(cfg("heater_deadband_c", 0.4))
+    HEATER_MIN_ON_S = float(cfg("heater_min_on_s", 120.0))
+    HEATER_MIN_OFF_S = float(cfg("heater_min_off_s", 120.0))
+    HEATER_MIN_LEVEL = float(cfg("heater_min_level", 10.0))
+    HEATER_MIN_FAN = float(cfg("heater_min_fan", 20.0))
+    
+    FAN_MIN_VENT_PCT = float(cfg("fan_min_vent_pct", 15.0))
+    INLET_MIN_PCT = float(cfg("inlet_min_pct", 10.0))
+    
+    FAN_COLD_MAX_PCT = float(cfg("fan_cold_max_pct", 35.0))
+    INLET_COLD_MAX_PCT = float(cfg("inlet_cold_max_pct", 50.0))
+    COLD_VENT_DELTA_C = float(cfg("cold_vent_delta_c", 0.6))
+    
+    LIGHT_ACTIVITY_HIGH = float(cfg("light_activity_high", 0.85))
+    ACTIVITY_MIN = float(cfg("activity_min", 0.3))
+    LIGHT_MIN_DAY_PCT = float(cfg("light_min_day_pct", 30.0))
+    LIGHT_MIN_NIGHT_PCT = float(cfg("light_min_night_pct", 5.0))
+    LIGHTS_ON_H = float(cfg("lights_on_h", 6.0))
+    LIGHTS_OFF_H = float(cfg("lights_off_h", 22.0))
+
+    FAN_RATE_LIMIT_PER_MIN = float(cfg("fan_rate_limit_per_min", 80.0))
+    HEATER_RATE_LIMIT_PER_MIN = float(cfg("heater_rate_limit_per_min", 100.0))
+    INLET_RATE_LIMIT_PER_MIN = float(cfg("inlet_rate_limit_per_min", 120.0))
+    LIGHT_RATE_LIMIT_PER_MIN = float(cfg("light_rate_limit_per_min", 150.0))
+    
+    FEED_THRESHOLD = float(cfg("feed_threshold", 1.5))
+    WATER_THRESHOLD = float(cfg("water_threshold", 0.8))
+    
+    FEED_REFILL_LOW_KG = float(cfg("feed_refill_low_kg", FEED_THRESHOLD))
+    FEED_REFILL_HIGH_KG = float(cfg("feed_refill_high_kg", FEED_THRESHOLD + 1.0))
+    WATER_REFILL_LOW_L = float(cfg("water_refill_low_l", WATER_THRESHOLD))
+    WATER_REFILL_HIGH_L = float(cfg("water_refill_high_l", WATER_THRESHOLD + 0.5))
 
     temp = status.get("temperature_c")
     nh3 = status.get("nh3_ppm")
@@ -163,7 +172,7 @@ def _build_actions_from_status(status: dict) -> List[Action]:
     # ===============================
     heater_level: Optional[float] = None
     if temp is not None:
-        heater_on = _heater_on_state(farm_id, zone, temp)
+        heater_on = _heater_on_state(farm_id, zone, temp, TEMP_SETPOINT, HEATER_DEADBAND_C, HEATER_MIN_ON_S, HEATER_MIN_OFF_S)
         if heater_on:
             temp_deficit = max(0.0, TEMP_SETPOINT - temp)
             heater_level = min(100.0, HEATER_KP_TEMP * temp_deficit)
@@ -247,6 +256,7 @@ def _build_actions_from_status(status: dict) -> List[Action]:
             inlet_open = min(inlet_open, INLET_COLD_MAX_PCT)
 
     if inlet_open is not None:
+        # Note: using raw inlet_open for rate limit, but int() for command
         inlet_open = _rate_limit(farm_id, zone, "inlet", inlet_open, INLET_RATE_LIMIT_PER_MIN)
         actions.append(
             Action(
@@ -292,6 +302,20 @@ def start_planner():
     print("[PLANNER] Starting...")
     mqtt_client = create_mqtt_client("planner")
     ks = KnowledgeStore()
+    
+    # Load initial config
+    config_path = "system_config.json"
+    system_config = load_system_config(config_path)
+
+    # Watch for config changes in a simplified manner or just load once for now.
+    # Ideally should share a ConfigLoader class or similar.
+    # For now, we'll reload on method invocation or just keep it static.
+    # Let's simple check mtime every once in a while or just reload if we want hot reloading.
+    # Since we are callback driven, we can store sys_config in mutable container or variable
+    # attached to the function scope via closure or class.
+    # Simpler: Make sys_config a mutable dict wrapper.
+    
+    config_container = {"data": system_config, "last_load": time.time()}
 
     # Subscribe to status from all farms and zones
     topic = "+/+/status"
@@ -299,6 +323,21 @@ def start_planner():
     print(f"[PLANNER] Subscribed to {topic}")
 
     def on_message(c, userdata, msg):
+        # Reload config if needed (simple poller)
+        try:
+             # Basic 5s throttle on reload check
+             now = time.time()
+             if now - config_container["last_load"] > 5.0:
+                 if os.path.exists(config_path):
+                     mtime = os.path.getmtime(config_path)
+                     # We don't track mtime in this simple container, but we could.
+                     # For now, just reload to be safe and "hot".
+                     # Optimization: check mtime
+                     config_container["data"] = load_system_config(config_path)
+                     config_container["last_load"] = now
+        except Exception as e:
+            print(f"[PLANNER] Config reload failed: {e}")
+
         try:
             status = json.loads(msg.payload.decode())
             print(f"[PLANNER] Received status on {msg.topic}: {status}")
@@ -318,7 +357,7 @@ def start_planner():
             print("[PLANNER] Status without zone, ignoring")
             return
 
-        actions = _build_actions_from_status(status)
+        actions = _build_actions_from_status(status, config_container["data"])
         if not actions:
             print(f"[PLANNER] No actions needed for {farm_id}/{zone}")
             return

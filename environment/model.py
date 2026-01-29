@@ -1,119 +1,90 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 import os
 import time
 
+@dataclass
+class SimulationConfig:
+    # --- SIMULATION CONSTANTS ---
+    outside_temp_base_c: float = 12.0
+    outside_temp_swing_c: float = 4.0
+    outside_temp_period_s: float = 24.0 * 3600.0
+    outside_co2_ppm: float = 420.0
+    outside_temp_seasonal_swing_c: float = 8.0
+    outside_temp_seasonal_peak_doy: int = 200
+    use_host_time: bool = False
 
-def _env_float(name: str, default: float) -> float:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except ValueError:
-        return default
+    startup_override_s: float = 60.0
 
+    # Barn physics
+    barn_volume_m3: float = 300.0
+    barn_ua_w_per_k: float = 350.0
+    thermal_mass_factor: float = 2.5
+    air_density: float = 1.2
+    air_cp: float = 1005.0
 
-def _env_int(name: str, default: int) -> int:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        return int(value)
-    except ValueError:
-        return default
+    # Ventilation
+    fan_max_flow_m3_s: float = 4.0
+    base_infiltration_m3_s: float = 0.15
 
+    # Heaters
+    heater_power_w: float = 120000.0
 
-# -------------------------
-# Simulation Constants
-# -------------------------
-OUTSIDE_TEMP_BASE_C = _env_float("OUTSIDE_TEMP_BASE_C", 16.0)
-OUTSIDE_TEMP_SWING_C = _env_float("OUTSIDE_TEMP_SWING_C", 7.0)
-OUTSIDE_TEMP_PERIOD_S = 24.0 * 3600.0
-OUTSIDE_CO2_PPM = _env_float("OUTSIDE_CO2_PPM", 420.0)
-OUTSIDE_TEMP_SEASONAL_SWING_C = _env_float("OUTSIDE_TEMP_SEASONAL_SWING_C", 8.0)
-OUTSIDE_TEMP_SEASONAL_PEAK_DOY = _env_int("OUTSIDE_TEMP_SEASONAL_PEAK_DOY", 200)
-USE_HOST_TIME = os.getenv("USE_HOST_TIME", "false").lower() in {"1", "true", "yes"}
+    # Birds (biology)
+    bird_count: int = 2000
+    bird_heat_w_base: float = 10.0
+    bird_heat_w_activity: float = 6.0
+    co2_lps_per_bird: float = 0.0012
+    co2_activity_mult: float = 1.5
+    nh3_mg_s_per_bird: float = 0.04
+    nh3_activity_mult: float = 1.5
+    nh3_temp_coeff: float = 0.04
+    nh3_decay_per_s: float = 0.0002777778
+    feed_g_per_bird_day: float = 160.0
+    water_l_per_bird_day: float = 0.35
+    feed_activity_mult: float = 0.8
+    water_activity_mult: float = 1.1
+    feed_hopper_capacity_kg: float = 12.0
+    water_tank_capacity_l: float = 10.0
+    feed_refill_flow_kg_s: float = 0.04
+    water_refill_flow_l_s: float = 0.25
+    feed_initial_kg: float = 8.0
+    water_initial_l: float = 7.0
 
-# Startup override (force all actuators OFF for this period)
-STARTUP_OVERRIDE_S = _env_float("STARTUP_OVERRIDE_S", 60.0)
+    # Hysteresis thresholds (adult birds) - these serve as defaults for auto-control
+    fan_on_temp_c: float = 25.0
+    fan_off_temp_c: float = 23.0
+    heater_on_temp_c: float = 20.0
+    heater_off_temp_c: float = 24.0
+    auto_fan_level: float = 60.0
 
-# Barn physics
-BARN_VOLUME_M3 = _env_float("BARN_VOLUME_M3", 600.0)
-BARN_UA_W_PER_K = _env_float("BARN_UA_W_PER_K", 250.0)
-THERMAL_MASS_FACTOR = _env_float("THERMAL_MASS_FACTOR", 3.0)
+    # Minimum on/off durations (fans only)
+    min_fan_on_s: float = 120.0
+    min_fan_off_s: float = 120.0
 
-AIR_DENSITY = _env_float("AIR_DENSITY", 1.2)
-AIR_CP = _env_float("AIR_CP", 1005.0)
+    # If no external command recently, auto-control takes over
+    auto_control: bool = True
+    auto_control_timeout_s: float = 300.0
 
-# Ventilation
-FAN_MAX_FLOW_M3_S = _env_float("FAN_MAX_FLOW_M3_S", 4.0)
-BASE_INFILTRATION_M3_S = _env_float("BASE_INFILTRATION_M3_S", 0.15)
+    # Staged ventilation (fan) levels and inlet defaults
+    # For simplicity, keeping these fixed or passed as complex objects could be an option,
+    # but let's keep them hardcoded/defaulted for now as they are structural.
+    fan_stages: tuple = (0.0, 40.0, 70.0, 100.0)
+    
+    # Light schedule (24h clock)
+    lights_on_h: float = 6.0
+    lights_off_h: float = 22.0
+    light_day_pct: float = 70.0
+    light_night_pct: float = 5.0
 
-# Heaters
-HEATER_POWER_W = _env_float("HEATER_POWER_W", 20000.0)
+    # Actuator ramps
+    fan_ramp_per_min: float = 40.0
+    heater_ramp_per_min: float = 60.0
+    inlet_ramp_per_min: float = 60.0
+    light_ramp_per_min: float = 80.0
 
-# Birds (biology)
-BIRD_COUNT = _env_int("BIRD_COUNT", 2000)
-BIRD_HEAT_W_BASE = _env_float("BIRD_HEAT_W_BASE", 10.0)
-BIRD_HEAT_W_ACTIVITY = _env_float("BIRD_HEAT_W_ACTIVITY", 6.0)
-
-CO2_LPS_PER_BIRD = _env_float("CO2_LPS_PER_BIRD", 0.0012)  # L/s per bird
-CO2_ACTIVITY_MULT = _env_float("CO2_ACTIVITY_MULT", 1.5)
-
-NH3_MG_S_PER_BIRD = _env_float("NH3_MG_S_PER_BIRD", 0.04)  # mg/s per bird
-NH3_ACTIVITY_MULT = _env_float("NH3_ACTIVITY_MULT", 1.5)
-NH3_TEMP_COEFF = _env_float("NH3_TEMP_COEFF", 0.04)
-NH3_DECAY_PER_S = _env_float("NH3_DECAY_PER_S", 1.0 / 3600.0)
-
-FEED_G_PER_BIRD_DAY = _env_float("FEED_G_PER_BIRD_DAY", 110.0)
-WATER_L_PER_BIRD_DAY = _env_float("WATER_L_PER_BIRD_DAY", 0.25)
-FEED_ACTIVITY_MULT = _env_float("FEED_ACTIVITY_MULT", 0.8)
-WATER_ACTIVITY_MULT = _env_float("WATER_ACTIVITY_MULT", 1.1)
-FEED_HOPPER_CAPACITY_KG = _env_float("FEED_HOPPER_CAPACITY_KG", 30.0)
-WATER_TANK_CAPACITY_L = _env_float("WATER_TANK_CAPACITY_L", 20.0)
-FEED_REFILL_FLOW_KG_S = _env_float("FEED_REFILL_FLOW_KG_S", 0.02)
-WATER_REFILL_FLOW_L_S = _env_float("WATER_REFILL_FLOW_L_S", 0.15)
-FEED_INITIAL_KG = _env_float("FEED_INITIAL_KG", min(20.0, FEED_HOPPER_CAPACITY_KG))
-WATER_INITIAL_L = _env_float("WATER_INITIAL_L", min(15.0, WATER_TANK_CAPACITY_L))
-
-# Hysteresis thresholds (adult birds)
-FAN_ON_TEMP_C = _env_float("FAN_ON_TEMP_C", 25.0)
-FAN_OFF_TEMP_C = _env_float("FAN_OFF_TEMP_C", 23.0)
-HEATER_ON_TEMP_C = _env_float("HEATER_ON_TEMP_C", 20.0)
-HEATER_OFF_TEMP_C = _env_float("HEATER_OFF_TEMP_C", 24.0)
-AUTO_FAN_LEVEL = _env_float("AUTO_FAN_LEVEL", 60.0)
-
-# Minimum on/off durations (fans only)
-MIN_FAN_ON_S = _env_float("MIN_FAN_ON_S", 120.0)
-MIN_FAN_OFF_S = _env_float("MIN_FAN_OFF_S", 120.0)
-
-# If no external command recently, auto-control takes over
-AUTO_CONTROL_TIMEOUT_S = _env_float("AUTO_CONTROL_TIMEOUT_S", 300.0)
-
-# Staged ventilation (fan) levels and inlet defaults
-FAN_STAGES = (0.0, 40.0, 70.0, 100.0)
-INLET_FOR_STAGE = {
-    0.0: 10.0,
-    40.0: 40.0,
-    70.0: 60.0,
-    100.0: 80.0,
-}
-
-# Light schedule (24h clock)
-LIGHTS_ON_H = _env_float("LIGHTS_ON_H", 6.0)
-LIGHTS_OFF_H = _env_float("LIGHTS_OFF_H", 22.0)
-LIGHT_DAY_PCT = _env_float("LIGHT_DAY_PCT", 70.0)
-LIGHT_NIGHT_PCT = _env_float("LIGHT_NIGHT_PCT", 5.0)
-
-# Actuator ramps
-FAN_RAMP_PER_MIN = _env_float("FAN_RAMP_PER_MIN", 40.0)  # % per minute
-HEATER_RAMP_PER_MIN = _env_float("HEATER_RAMP_PER_MIN", 60.0)
-INLET_RAMP_PER_MIN = _env_float("INLET_RAMP_PER_MIN", 60.0)
-LIGHT_RAMP_PER_MIN = _env_float("LIGHT_RAMP_PER_MIN", 80.0)
-
-# Activity dynamics
-ACTIVITY_TIME_CONSTANT_MIN = _env_float("ACTIVITY_TIME_CONSTANT_MIN", 15.0)
+    # Activity dynamics
+    activity_time_constant_min: float = 8.0
 
 
 @dataclass
@@ -122,8 +93,8 @@ class EnvironmentState:
     temperature_c: float = 23.0
     co2_ppm: float = 1500.0
     nh3_ppm: float = 12.0
-    feed_kg: float = FEED_INITIAL_KG
-    water_l: float = WATER_INITIAL_L
+    feed_kg: float = 8.0
+    water_l: float = 7.0
     activity: float = 0.4
 
     # --- ACTUATORS (6) ---
@@ -156,50 +127,61 @@ class EnvironmentState:
     # internal time for demo behavior
     sim_time_s: float = 0.0
 
-    # Physical config (overridable)
-    bird_count: int = BIRD_COUNT
-    barn_volume_m3: float = BARN_VOLUME_M3
+    # Physical config (overridable) - NOTE: These are now largely superseded by SimulationConfig
+    # but we can keep them if we want state-specific overrides, or purely rely on Config.
+    # For backward compat with existing log logic, let's leave them but initialize from config if possible.
+    bird_count: int = 2000
+    barn_volume_m3: float = 300.0
 
 
-def _outside_temp(sim_time_s: float) -> float:
-    if USE_HOST_TIME:
+# Fixed mapping for inlet stages, can be moved to config if needed
+INLET_FOR_STAGE = {
+    0.0: 10.0,
+    40.0: 40.0,
+    70.0: 60.0,
+    100.0: 80.0,
+}
+
+
+def _outside_temp(sim_time_s: float, config: SimulationConfig) -> float:
+    if config.use_host_time:
         now = time.time()
         tm = time.localtime(now)
         day_phase = (tm.tm_hour + tm.tm_min / 60.0 + tm.tm_sec / 3600.0) / 24.0
-        season_phase = 2.0 * math.pi * ((tm.tm_yday - OUTSIDE_TEMP_SEASONAL_PEAK_DOY) / 365.0)
-        seasonal_offset = OUTSIDE_TEMP_SEASONAL_SWING_C * math.cos(season_phase)
-        return OUTSIDE_TEMP_BASE_C + seasonal_offset + OUTSIDE_TEMP_SWING_C * math.sin(2.0 * math.pi * day_phase)
-    phase = (sim_time_s % OUTSIDE_TEMP_PERIOD_S) / OUTSIDE_TEMP_PERIOD_S
-    return OUTSIDE_TEMP_BASE_C + OUTSIDE_TEMP_SWING_C * math.sin(2.0 * math.pi * phase)
+        season_phase = 2.0 * math.pi * ((tm.tm_yday - config.outside_temp_seasonal_peak_doy) / 365.0)
+        seasonal_offset = config.outside_temp_seasonal_swing_c * math.cos(season_phase)
+        return config.outside_temp_base_c + seasonal_offset + config.outside_temp_swing_c * math.sin(2.0 * math.pi * day_phase)
+    phase = (sim_time_s % config.outside_temp_period_s) / config.outside_temp_period_s
+    return config.outside_temp_base_c + config.outside_temp_swing_c * math.sin(2.0 * math.pi * phase)
 
 
 def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
-def _time_of_day_h(sim_time_s: float) -> float:
-    if USE_HOST_TIME:
+def _time_of_day_h(sim_time_s: float, use_host_time: bool) -> float:
+    if use_host_time:
         tm = time.localtime()
         return tm.tm_hour + (tm.tm_min / 60.0) + (tm.tm_sec / 3600.0)
     return (sim_time_s / 3600.0) % 24.0
 
 
-def _stage_fan_level(command_level: float) -> float:
+def _stage_fan_level(command_level: float, stages: tuple) -> float:
     if command_level <= 0.0:
         return 0.0
-    for stage in FAN_STAGES[1:]:
+    for stage in stages[1:]:
         if command_level <= stage:
             return stage
-    return FAN_STAGES[-1]
+    return stages[-1]
 
 
-def _ventilation_flow_m3_s(fan_level: float, inlet_open_pct: float) -> float:
+def _ventilation_flow_m3_s(fan_level: float, inlet_open_pct: float, config: SimulationConfig) -> float:
     inlet_factor = 0.2 + 0.8 * (inlet_open_pct / 100.0)
-    fan_flow = FAN_MAX_FLOW_M3_S * (fan_level / 100.0) * inlet_factor
-    return BASE_INFILTRATION_M3_S + fan_flow
+    fan_flow = config.fan_max_flow_m3_s * (fan_level / 100.0) * inlet_factor
+    return config.base_infiltration_m3_s + fan_flow
 
 
-def step(state: EnvironmentState, dt_s: float) -> None:
+def step(state: EnvironmentState, config: SimulationConfig, dt_s: float) -> None:
     """
     Advance the environment dt_s seconds.
     Uses a physically-based thermal and gas mass-balance model.
@@ -207,40 +189,45 @@ def step(state: EnvironmentState, dt_s: float) -> None:
 
     state.sim_time_s += dt_s
 
+    # Synchronize state redundant fields with config if needed
+    # (Though ideally we should invoke logic directly from config)
+    state.bird_count = config.bird_count
+    state.barn_volume_m3 = config.barn_volume_m3
+
     # --------------------------
     # 0. AUTO-CONTROL (HYSTERESIS)
     # --------------------------
-    auto_control_active = state.auto_control and state.sim_time_s >= STARTUP_OVERRIDE_S
+    auto_control_active = state.auto_control and state.sim_time_s >= config.startup_override_s
     if auto_control_active:
         now = state.sim_time_s
-        fan_stale = state.fan_cmd_last_s == 0.0 or now - state.fan_cmd_last_s >= AUTO_CONTROL_TIMEOUT_S
+        fan_stale = state.fan_cmd_last_s == 0.0 or now - state.fan_cmd_last_s >= config.auto_control_timeout_s
         if fan_stale:
-            if state.temperature_c >= FAN_ON_TEMP_C:
-                state.fan_level_command = max(state.fan_level_command, AUTO_FAN_LEVEL)
-            elif state.temperature_c <= FAN_OFF_TEMP_C:
+            if state.temperature_c >= config.fan_on_temp_c:
+                state.fan_level_command = max(state.fan_level_command, config.auto_fan_level)
+            elif state.temperature_c <= config.fan_off_temp_c:
                 state.fan_level_command = 0.0
 
-        heater_stale = state.heater_cmd_last_s == 0.0 or now - state.heater_cmd_last_s >= AUTO_CONTROL_TIMEOUT_S
+        heater_stale = state.heater_cmd_last_s == 0.0 or now - state.heater_cmd_last_s >= config.auto_control_timeout_s
         if heater_stale:
-            if state.temperature_c <= HEATER_ON_TEMP_C:
+            if state.temperature_c <= config.heater_on_temp_c:
                 state.heater_level_command = 100.0
-            elif state.temperature_c >= HEATER_OFF_TEMP_C:
+            elif state.temperature_c >= config.heater_off_temp_c:
                 state.heater_level_command = 0.0
 
-        inlet_stale = state.inlet_cmd_last_s == 0.0 or now - state.inlet_cmd_last_s >= AUTO_CONTROL_TIMEOUT_S
+        inlet_stale = state.inlet_cmd_last_s == 0.0 or now - state.inlet_cmd_last_s >= config.auto_control_timeout_s
         if inlet_stale:
-            staged_fan = _stage_fan_level(state.fan_level_command)
+            staged_fan = _stage_fan_level(state.fan_level_command, config.fan_stages)
             state.inlet_open_pct_command = INLET_FOR_STAGE.get(staged_fan, state.inlet_open_pct_command)
 
-        light_stale = state.light_cmd_last_s == 0.0 or now - state.light_cmd_last_s >= AUTO_CONTROL_TIMEOUT_S
+        light_stale = state.light_cmd_last_s == 0.0 or now - state.light_cmd_last_s >= config.auto_control_timeout_s
         if light_stale:
-            time_of_day_h = _time_of_day_h(state.sim_time_s)
-            if LIGHTS_ON_H <= time_of_day_h < LIGHTS_OFF_H:
-                state.light_level_pct_command = LIGHT_DAY_PCT
+            time_of_day_h = _time_of_day_h(state.sim_time_s, config.use_host_time)
+            if config.lights_on_h <= time_of_day_h < config.lights_off_h:
+                state.light_level_pct_command = config.light_day_pct
             else:
-                state.light_level_pct_command = LIGHT_NIGHT_PCT
+                state.light_level_pct_command = config.light_night_pct
 
-    if state.sim_time_s < STARTUP_OVERRIDE_S:
+    if state.sim_time_s < config.startup_override_s:
         state.fan_level_command = 0.0
         state.heater_level_command = 0.0
         state.inlet_open_pct_command = 0.0
@@ -260,17 +247,17 @@ def step(state: EnvironmentState, dt_s: float) -> None:
     desired_fan_on = state.fan_level_command > 0.0
     if desired_fan_on != state.fan_on:
         elapsed = now - state.fan_last_switch_s
-        if desired_fan_on and elapsed >= MIN_FAN_OFF_S:
+        if desired_fan_on and elapsed >= config.min_fan_off_s:
             state.fan_on = True
             state.fan_last_switch_s = now
-        elif (not desired_fan_on) and elapsed >= MIN_FAN_ON_S:
+        elif (not desired_fan_on) and elapsed >= config.min_fan_on_s:
             state.fan_on = False
             state.fan_last_switch_s = now
 
-    staged_target = _stage_fan_level(state.fan_level_command)
+    staged_target = _stage_fan_level(state.fan_level_command, config.fan_stages)
     target_fan_level = staged_target if state.fan_on else 0.0
     dt_min = dt_s / 60.0
-    max_step = FAN_RAMP_PER_MIN * dt_min
+    max_step = config.fan_ramp_per_min * dt_min
     delta = target_fan_level - state.fan_level
     if delta > max_step:
         delta = max_step
@@ -278,7 +265,7 @@ def step(state: EnvironmentState, dt_s: float) -> None:
         delta = -max_step
     state.fan_level = _clamp(state.fan_level + delta, 0.0, 100.0)
 
-    heater_step = HEATER_RAMP_PER_MIN * dt_min
+    heater_step = config.heater_ramp_per_min * dt_min
     heater_delta = state.heater_level_command - state.heater_level
     if heater_delta > heater_step:
         heater_delta = heater_step
@@ -286,7 +273,7 @@ def step(state: EnvironmentState, dt_s: float) -> None:
         heater_delta = -heater_step
     state.heater_level = _clamp(state.heater_level + heater_delta, 0.0, 100.0)
 
-    inlet_step = INLET_RAMP_PER_MIN * dt_min
+    inlet_step = config.inlet_ramp_per_min * dt_min
     inlet_delta = state.inlet_open_pct_command - state.inlet_open_pct
     if inlet_delta > inlet_step:
         inlet_delta = inlet_step
@@ -294,7 +281,7 @@ def step(state: EnvironmentState, dt_s: float) -> None:
         inlet_delta = -inlet_step
     state.inlet_open_pct = _clamp(state.inlet_open_pct + inlet_delta, 0.0, 100.0)
 
-    light_step = LIGHT_RAMP_PER_MIN * dt_min
+    light_step = config.light_ramp_per_min * dt_min
     light_delta = state.light_level_pct_command - state.light_level_pct
     if light_delta > light_step:
         light_delta = light_step
@@ -305,19 +292,19 @@ def step(state: EnvironmentState, dt_s: float) -> None:
     # --------------------------
     # 2. VENTILATION FLOW
     # --------------------------
-    flow_m3_s = _ventilation_flow_m3_s(state.fan_level, state.inlet_open_pct)
+    flow_m3_s = _ventilation_flow_m3_s(state.fan_level, state.inlet_open_pct, config)
 
     # --------------------------
     # 3. TEMPERATURE DYNAMICS
     # --------------------------
-    outside_temp = _outside_temp(state.sim_time_s)
-    heat_capacity_j_per_k = AIR_DENSITY * AIR_CP * state.barn_volume_m3 * THERMAL_MASS_FACTOR
+    outside_temp = _outside_temp(state.sim_time_s, config)
+    heat_capacity_j_per_k = config.air_density * config.air_cp * config.barn_volume_m3 * config.thermal_mass_factor
 
-    q_loss = BARN_UA_W_PER_K * (state.temperature_c - outside_temp)
-    q_vent = AIR_DENSITY * AIR_CP * flow_m3_s * (state.temperature_c - outside_temp)
-    q_heater = HEATER_POWER_W * (state.heater_level / 100.0)
+    q_loss = config.barn_ua_w_per_k * (state.temperature_c - outside_temp)
+    q_vent = config.air_density * config.air_cp * flow_m3_s * (state.temperature_c - outside_temp)
+    q_heater = config.heater_power_w * (state.heater_level / 100.0)
 
-    bird_heat_w = state.bird_count * (BIRD_HEAT_W_BASE + BIRD_HEAT_W_ACTIVITY * state.activity)
+    bird_heat_w = config.bird_count * (config.bird_heat_w_base + config.bird_heat_w_activity * state.activity)
 
     dtemp = (q_heater + bird_heat_w - q_loss - q_vent) / heat_capacity_j_per_k
     state.temperature_c = _clamp(state.temperature_c + dtemp * dt_s, 10.0, 40.0)
@@ -325,10 +312,10 @@ def step(state: EnvironmentState, dt_s: float) -> None:
     # --------------------------
     # 4. CO2 DYNAMICS (mass balance)
     # --------------------------
-    co2_lps = CO2_LPS_PER_BIRD * (1.0 + CO2_ACTIVITY_MULT * state.activity)
-    co2_m3_s = (co2_lps * state.bird_count) / 1000.0
-    co2_gen_ppm_s = (co2_m3_s / state.barn_volume_m3) * 1.0e6
-    co2_vent_ppm_s = (flow_m3_s / state.barn_volume_m3) * (OUTSIDE_CO2_PPM - state.co2_ppm)
+    co2_lps = config.co2_lps_per_bird * (1.0 + config.co2_activity_mult * state.activity)
+    co2_m3_s = (co2_lps * config.bird_count) / 1000.0
+    co2_gen_ppm_s = (co2_m3_s / config.barn_volume_m3) * 1.0e6
+    co2_vent_ppm_s = (flow_m3_s / config.barn_volume_m3) * (config.outside_co2_ppm - state.co2_ppm)
 
     state.co2_ppm += (co2_gen_ppm_s + co2_vent_ppm_s) * dt_s
     state.co2_ppm = _clamp(state.co2_ppm, 400.0, 6000.0)
@@ -338,16 +325,16 @@ def step(state: EnvironmentState, dt_s: float) -> None:
     # --------------------------
     temp_factor = max(0.0, state.temperature_c - 20.0)
     nh3_mg_s = (
-        NH3_MG_S_PER_BIRD
-        * state.bird_count
-        * (1.0 + NH3_ACTIVITY_MULT * state.activity)
-        * (1.0 + NH3_TEMP_COEFF * temp_factor)
+        config.nh3_mg_s_per_bird
+        * config.bird_count
+        * (1.0 + config.nh3_activity_mult * state.activity)
+        * (1.0 + config.nh3_temp_coeff * temp_factor)
     )
 
     # Convert mg/s to ppm/s: ppm = mg/m3 * (24.45 / 17.0)
-    nh3_ppm_gen_s = (nh3_mg_s / state.barn_volume_m3) * (24.45 / 17.0)
-    nh3_vent_ppm_s = (flow_m3_s / state.barn_volume_m3) * (0.0 - state.nh3_ppm)
-    nh3_decay_ppm_s = -NH3_DECAY_PER_S * state.nh3_ppm
+    nh3_ppm_gen_s = (nh3_mg_s / config.barn_volume_m3) * (24.45 / 17.0)
+    nh3_vent_ppm_s = (flow_m3_s / config.barn_volume_m3) * (0.0 - state.nh3_ppm)
+    nh3_decay_ppm_s = -config.nh3_decay_per_s * state.nh3_ppm
 
     state.nh3_ppm += (nh3_ppm_gen_s + nh3_vent_ppm_s + nh3_decay_ppm_s) * dt_s
     state.nh3_ppm = _clamp(state.nh3_ppm, 0.0, 200.0)
@@ -355,8 +342,8 @@ def step(state: EnvironmentState, dt_s: float) -> None:
     # --------------------------
     # 6. FEED & WATER DYNAMICS
     # --------------------------
-    feed_kg_s = (FEED_G_PER_BIRD_DAY / 1000.0) / 86400.0
-    feed_rate = state.bird_count * feed_kg_s * (0.6 + FEED_ACTIVITY_MULT * state.activity)
+    feed_kg_s = (config.feed_g_per_bird_day / 1000.0) / 86400.0
+    feed_rate = config.bird_count * feed_kg_s * (0.6 + config.feed_activity_mult * state.activity)
     if state.temperature_c > 28.0:
         feed_rate *= 0.9
     if state.temperature_c < 18.0:
@@ -369,12 +356,12 @@ def step(state: EnvironmentState, dt_s: float) -> None:
     feed_refill_active = state.feed_refill_on or state.feed_refill_remaining_s > 0.0
     if feed_refill_active:
         state.feed_kg = min(
-            FEED_HOPPER_CAPACITY_KG,
-            state.feed_kg + FEED_REFILL_FLOW_KG_S * dt_s,
+            config.feed_hopper_capacity_kg,
+            state.feed_kg + config.feed_refill_flow_kg_s * dt_s,
         )
 
-    water_l_s = WATER_L_PER_BIRD_DAY / 86400.0
-    water_rate = state.bird_count * water_l_s * (0.7 + WATER_ACTIVITY_MULT * state.activity)
+    water_l_s = config.water_l_per_bird_day / 86400.0
+    water_rate = config.bird_count * water_l_s * (0.7 + config.water_activity_mult * state.activity)
     if state.temperature_c > 26.0:
         water_rate *= 1.2
     if state.temperature_c < 18.0:
@@ -385,14 +372,14 @@ def step(state: EnvironmentState, dt_s: float) -> None:
     water_refill_active = state.water_refill_on or state.water_refill_remaining_s > 0.0
     if water_refill_active:
         state.water_l = min(
-            WATER_TANK_CAPACITY_L,
-            state.water_l + WATER_REFILL_FLOW_L_S * dt_s,
+            config.water_tank_capacity_l,
+            state.water_l + config.water_refill_flow_l_s * dt_s,
         )
 
     # --------------------------
     # 7. ACTIVITY DYNAMICS
     # --------------------------
-    time_of_day_h = _time_of_day_h(state.sim_time_s)
+    time_of_day_h = _time_of_day_h(state.sim_time_s, config.use_host_time)
     circadian = 0.5 + 0.5 * math.sin(2.0 * math.pi * (time_of_day_h - 6.0) / 24.0)
     light_factor = state.light_level_pct / 100.0
 
@@ -410,7 +397,7 @@ def step(state: EnvironmentState, dt_s: float) -> None:
         target_activity -= 0.1
 
     target_activity = _clamp(target_activity, 0.0, 1.0)
-    activity_tau_s = ACTIVITY_TIME_CONSTANT_MIN * 60.0
+    activity_tau_s = config.activity_time_constant_min * 60.0
     state.activity += (target_activity - state.activity) * (dt_s / activity_tau_s)
     state.activity = _clamp(state.activity, 0.0, 1.0)
 

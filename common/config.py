@@ -1,39 +1,8 @@
 import os
+import json
 
 FARM_ID = os.getenv("FARM_ID", "farm1")
 ZONE_ID = os.getenv("ZONE_ID", "zone1")
-
-# --- TEMPERATURE / AIR QUALITY ---
-TEMP_MIN = float(os.getenv("TEMP_MIN", 24))          # demo: higher so heater is relevant
-TEMP_MAX = float(os.getenv("TEMP_MAX", 28))
-TEMP_SETPOINT = float(os.getenv("TEMP_SETPOINT", 26))
-
-NH3_THRESHOLD = float(os.getenv("NH3_THRESHOLD", 25))
-
-# CO2 (ppm)
-CO2_SETPOINT = float(os.getenv("CO2_SETPOINT", 1500))
-CO2_MAX = float(os.getenv("CO2_MAX", 3000))
-
-# Fan controller gains (demo-tuned so fan moves a lot)
-FAN_KP_TEMP = float(os.getenv("FAN_KP_TEMP", 10.0))    # % per °C
-FAN_KP_CO2 = float(os.getenv("FAN_KP_CO2", 0.02))      # % per ppm
-FAN_MAX = float(os.getenv("FAN_MAX", 100.0))
-FAN_MIN = float(os.getenv("FAN_MIN", 0.0))
-
-# Minimum fan when heater ON (avoid stale air)
-HEATER_MIN_FAN = float(os.getenv("HEATER_MIN_FAN", 20.0))
-
-# --- FEED & WATER ---
-FEED_THRESHOLD = float(os.getenv("FEED_THRESHOLD", 1.5))         # kg (top-up threshold)
-FEED_EMPTY_THRESHOLD = float(os.getenv("FEED_EMPTY_THRESHOLD", 0.3))   # kg (big refill)
-
-WATER_THRESHOLD = float(os.getenv("WATER_THRESHOLD", 0.8))       # L
-WATER_EMPTY_THRESHOLD = float(os.getenv("WATER_EMPTY_THRESHOLD", 0.3)) # L
-
-# --- ACTIVITY / LIGHT ---
-ACTIVITY_MIN = float(os.getenv("ACTIVITY_MIN", 0.3))
-
-LUX_DAY_MIN = float(os.getenv("LUX_DAY_MIN", 40))  # demo: slightly lower so light toggles
 
 # --- MEASUREMENTS NAMES ---
 SENSOR_MEASUREMENT = "sensors"
@@ -45,8 +14,120 @@ PLAN_MEASUREMENT = "plans"
 INFLUXDB_BUCKET = os.getenv("INFLUXDB_BUCKET", "farm-bucket")
 INFLUXDB_ORG = os.getenv("INFLUXDB_ORG", "farm-org")
 
-# --- DYNAMIC CONFIG ---
-import json
+# --- HARDCODED DEFAULTS (Fallbacks) ---
+DEFAULTS = {
+    "temp_min": 24.0,
+    "temp_max": 28.0,
+    "temp_setpoint": 26.0,
+    "co2_setpoint": 1500.0,
+    "co2_max": 3000.0,
+    "nh3_threshold": 25.0,
+    "fan_kp_temp": 10.0,
+    "fan_kp_co2": 0.02,
+    "fan_max": 100.0,
+    "fan_min": 0.0,
+    "heater_min_fan": 20.0,
+    "feed_threshold": 1.5,
+    "feed_empty_threshold": 0.3,
+    "water_threshold": 0.8,
+    "water_empty_threshold": 0.3,
+    "activity_min": 0.3,
+    "lux_day_min": 40.0,
+    "use_host_time": True,
+    "outside_temp_base_c": 12.0,
+    "outside_temp_swing_c": 4.0,
+    "outside_temp_seasonal_swing_c": 8.0,
+    "outside_temp_seasonal_peak_doy": 200,
+    "barn_volume_m3": 300.0,
+    "barn_ua_w_per_k": 350.0,
+    "thermal_mass_factor": 2.5,
+    "fan_max_flow_m3_s": 4.0,
+    "base_infiltration_m3_s": 0.15,
+    "heater_power_w": 120000.0,
+    "bird_count": 2000,
+    "bird_heat_w_base": 10.0,
+    "bird_heat_w_activity": 6.0,
+    "co2_lps_per_bird": 0.0012,
+    "co2_activity_mult": 1.5,
+    "nh3_mg_s_per_bird": 0.04,
+    "nh3_activity_mult": 1.5,
+    "nh3_temp_coeff": 0.04,
+    "nh3_decay_per_s": 0.0002777778,
+    "feed_g_per_bird_day": 160.0,
+    "water_l_per_bird_day": 0.35,
+    "feed_activity_mult": 0.8,
+    "water_activity_mult": 1.1,
+    "activity_time_constant_min": 8.0,
+    "feed_hopper_capacity_kg": 12.0,
+    "water_tank_capacity_l": 10.0,
+    "feed_refill_flow_kg_s": 0.04,
+    "water_refill_flow_l_s": 0.25,
+    "feed_initial_kg": 8.0,
+    "water_initial_l": 7.0,
+    "feed_refill_low_kg": 3.5,
+    "feed_refill_high_kg": 8.5,
+    "water_refill_low_l": 3.0,
+    "water_refill_high_l": 7.0,
+    "heater_kp_temp": 25.0,
+    "heater_deadband_c": 0.3,
+    "heater_min_on_s": 60.0,
+    "heater_min_off_s": 60.0,
+    "heater_min_level": 15.0,
+    "fan_min_vent_pct": 10.0,
+    "inlet_min_pct": 5.0,
+    "fan_cold_max_pct": 20.0,
+    "inlet_cold_max_pct": 30.0,
+    "cold_vent_delta_c": 0.6,
+    "light_min_day_pct": 30.0,
+    "light_min_night_pct": 5.0,
+    "lights_on_h": 6.0,
+    "lights_off_h": 22.0,
+    "fan_rate_limit_per_min": 120.0,
+    "heater_rate_limit_per_min": 140.0,
+    "inlet_rate_limit_per_min": 160.0,
+    "light_rate_limit_per_min": 200.0,
+    "light_activity_high": 0.85,
+    "heater_on_temp_c": 20.0,
+    "heater_off_temp_c": 24.0,
+    "auto_control": True,
+    "startup_override_s": 0.0,
+    "fan_on_temp_c": 25.0,
+    "fan_off_temp_c": 23.0,
+    "auto_fan_level": 60.0,
+    "min_fan_on_s": 120.0,
+    "min_fan_off_s": 120.0,
+    "auto_control_timeout_s": 300.0,
+    "fan_ramp_per_min": 40.0,
+    "heater_ramp_per_min": 60.0,
+    "inlet_ramp_per_min": 60.0,
+    "light_ramp_per_min": 80.0,
+    "light_day_pct": 70.0,
+    "light_night_pct": 5.0
+}
+
+# --- LEGACY CONSTANTS (Deprecation Warning: Use get_config in new code) ---
+# We keep these for now so we don't break code that hasn't been migrated yet,
+# but ideally everything should switch to get_config().
+# These are initialized from DEFAULTS but can be overridden by env for backward compat if really needed,
+# though we prefer system_config.json now.
+TEMP_MIN = float(os.getenv("TEMP_MIN", DEFAULTS["temp_min"]))
+TEMP_MAX = float(os.getenv("TEMP_MAX", DEFAULTS["temp_max"]))
+TEMP_SETPOINT = float(os.getenv("TEMP_SETPOINT", DEFAULTS["temp_setpoint"]))
+NH3_THRESHOLD = float(os.getenv("NH3_THRESHOLD", DEFAULTS["nh3_threshold"]))
+CO2_SETPOINT = float(os.getenv("CO2_SETPOINT", DEFAULTS["co2_setpoint"]))
+CO2_MAX = float(os.getenv("CO2_MAX", DEFAULTS["co2_max"]))
+FAN_KP_TEMP = float(os.getenv("FAN_KP_TEMP", DEFAULTS["fan_kp_temp"]))
+FAN_KP_CO2 = float(os.getenv("FAN_KP_CO2", DEFAULTS["fan_kp_co2"]))
+FAN_MAX = float(os.getenv("FAN_MAX", DEFAULTS["fan_max"]))
+FAN_MIN = float(os.getenv("FAN_MIN", DEFAULTS["fan_min"]))
+HEATER_MIN_FAN = float(os.getenv("HEATER_MIN_FAN", DEFAULTS["heater_min_fan"]))
+FEED_THRESHOLD = float(os.getenv("FEED_THRESHOLD", DEFAULTS["feed_threshold"]))
+FEED_EMPTY_THRESHOLD = float(os.getenv("FEED_EMPTY_THRESHOLD", DEFAULTS["feed_empty_threshold"]))
+WATER_THRESHOLD = float(os.getenv("WATER_THRESHOLD", DEFAULTS["water_threshold"]))
+WATER_EMPTY_THRESHOLD = float(os.getenv("WATER_EMPTY_THRESHOLD", DEFAULTS["water_empty_threshold"]))
+ACTIVITY_MIN = float(os.getenv("ACTIVITY_MIN", DEFAULTS["activity_min"]))
+LUX_DAY_MIN = float(os.getenv("LUX_DAY_MIN", DEFAULTS["lux_day_min"]))
+
 
 def load_system_config(path="system_config.json"):
     try:
@@ -55,3 +136,42 @@ def load_system_config(path="system_config.json"):
     except Exception as e:
         print(f"Error loading system config from {path}: {e}")
         return {"farms": [{"id": FARM_ID, "zones": [ZONE_ID]}]}
+
+def get_config(key: str, system_config: dict, farm_id: str = None, zone_id: str = None, default=None):
+    """
+    Retrieve config value with precedence:
+    1. Zone-specific config (in system_config)
+    2. Farm-specific config (not yet fully implemented in schema but supported here)
+    3. Global defaults (in system_config['defaults'])
+    4. Hardcoded DEFAULTS
+    """
+    # 1. Zone specific lookup
+    if farm_id and zone_id:
+        for farm in system_config.get("farms", []):
+            if farm["id"] == farm_id:
+                # Check zone config
+                for z in farm.get("zones", []):
+                    # Zone can be string "zone1" or dict {"id": "zone1", "config": {...}}
+                    if isinstance(z, dict) and z.get("id") == zone_id:
+                        if "config" in z and key in z["config"]:
+                            return z["config"][key]
+                    elif z == zone_id:
+                        # Zone defined as string -> check if farm has 'config' (shared for all zones in farm)
+                        # This aligns with the schema seen in environment/main.py: 
+                        # "farms": [{"id": "f1", "config": {...}}]
+                        if "config" in farm and key in farm["config"]:
+                            return farm["config"][key]
+                
+                # Check farm-level config if not found in zone (and zone was object without config)
+                if "config" in farm and key in farm["config"]:
+                    return farm["config"][key]
+
+    # 2. Global defaults from JSON
+    if "defaults" in system_config and key in system_config["defaults"]:
+        return system_config["defaults"][key]
+
+    # 3. Hardcoded defaults
+    if key in DEFAULTS:
+        return DEFAULTS[key]
+
+    return default

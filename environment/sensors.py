@@ -34,7 +34,6 @@ def start_sensors():
 
         base = f"{FARM_ID}/{ZONE_ID}/sensors"
 
-        # --- Add some measurement noise ---
         temperature_c = state.temperature_c + random.gauss(0, 0.2)
         co2_ppm = state.co2_ppm + random.gauss(0, 30)
         nh3_ppm = state.nh3_ppm + random.gauss(0, 2)

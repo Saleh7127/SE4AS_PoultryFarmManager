@@ -5,20 +5,18 @@ import os
 import random
 import threading
 import time
+from dataclasses import fields
 
 from common.mqtt_utils import create_mqtt_client
-from common.config import FARM_ID, ZONE_ID
+from common.config import FARM_ID, ZONE_ID, get_config
 from .model import (
     EnvironmentState,
+    SimulationConfig,
     step,
-    STARTUP_OVERRIDE_S,
-    FEED_REFILL_FLOW_KG_S,
-    WATER_REFILL_FLOW_L_S,
 )
 
 SENSOR_INTERVAL_S = float(os.getenv("SENSOR_INTERVAL_S", 5.0))
 SIM_STEP_S = float(os.getenv("SIM_STEP_S", SENSOR_INTERVAL_S))
-AUTO_CONTROL = os.getenv("AUTO_CONTROL", "true").lower() in {"1", "true", "yes"}
 
 
 class EnvironmentRunner(threading.Thread):
@@ -29,20 +27,40 @@ class EnvironmentRunner(threading.Thread):
     - Publishes 6 sensor values every minute
     """
 
-    def __init__(self, farm_id: str, zone_id: str, config_overrides: dict = None):
+    def __init__(self, farm_id: str, zone_id: str, system_config: dict):
         super().__init__(daemon=True)
         self.farm_id = farm_id
         self.zone_id = zone_id
+        self.system_config = system_config
         
-        # Apply overrides to state
-        self.state = EnvironmentState(auto_control=AUTO_CONTROL)
-        if config_overrides:
-            for k, v in config_overrides.items():
-                if hasattr(self.state, k):
-                    setattr(self.state, k, v)
-                    print(f"[ENV {farm_id}/{zone_id}] Overrode {k}={v}")
-                else:
-                    print(f"[ENV {farm_id}/{zone_id}] Unknown config key {k}, ignoring.")
+        # Load Simulation Config for this zone
+        self.config = SimulationConfig()
+        
+        # Iterate over dataclass fields and try to load from system_config
+        for field_info in fields(SimulationConfig):
+            key = field_info.name
+            val = get_config(key, system_config, farm_id, zone_id)
+            if val is not None:
+                # Convert type if necessary (env vars were usually string, json is typed but safer to cast)
+                target_type = field_info.type
+                try:
+                    if target_type == bool:
+                         # Handle typical bool strings if they come from loose json/env
+                         if isinstance(val, str):
+                             val = val.lower() in ("true", "1", "yes")
+                         else:
+                             val = bool(val)
+                    else:
+                        val = target_type(val)
+                    setattr(self.config, key, val)
+                except (ValueError, TypeError) as e:
+                    print(f"[ENV {farm_id}/{zone_id}] Warning: Could not cast config {key}={val} to {target_type}: {e}")
+
+        # Initialize State
+        # Note: Some state fields depend on config (like bird_count), we sync them.
+        self.state = EnvironmentState(auto_control=self.config.auto_control)
+        self.state.bird_count = self.config.bird_count
+        self.state.barn_volume_m3 = self.config.barn_volume_m3
 
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -97,7 +115,7 @@ class EnvironmentRunner(threading.Thread):
         s = self.state
         prefix = f"[ENV {self.farm_id}/{self.zone_id}]"
         
-        if s.sim_time_s < STARTUP_OVERRIDE_S:
+        if s.sim_time_s < self.config.startup_override_s:
             # print(f"{prefix} Ignoring actuator command during startup override")
             return
 
@@ -137,8 +155,8 @@ class EnvironmentRunner(threading.Thread):
             else:
                 amount_g = float(data.get("amount_g", 0.0))
                 amount_kg = max(0.0, amount_g) / 1000.0
-                if amount_kg > 0.0 and FEED_REFILL_FLOW_KG_S > 0.0:
-                    s.feed_refill_remaining_s = amount_kg / FEED_REFILL_FLOW_KG_S
+                if amount_kg > 0.0 and self.config.feed_refill_flow_kg_s > 0.0:
+                    s.feed_refill_remaining_s = amount_kg / self.config.feed_refill_flow_kg_s
                 print(f"{prefix} Feed refill for {s.feed_refill_remaining_s:.1f}s")
 
         elif actuator == "water_valve":
@@ -165,7 +183,7 @@ class EnvironmentRunner(threading.Thread):
 
     def _tick(self, dt_s: float):
         with self._lock:
-            step(self.state, dt_s)
+            step(self.state, self.config, dt_s)
 
     def _snapshot(self) -> EnvironmentState:
         with self._lock:
@@ -234,7 +252,9 @@ def main():
                 desired = set()
                 for farm in config.get("farms", []):
                     f_id = farm["id"]
-                    for z_id in farm.get("zones", []):
+                    for z in farm.get("zones", []):
+                        # Handle both string zones and object zones
+                        z_id = z["id"] if isinstance(z, dict) else z
                         desired.add((f_id, z_id))
                 
                 # Identify changes
@@ -245,28 +265,24 @@ def main():
                 # Start new runners
                 for (f_id, z_id) in to_add:
                     print(f"[ENV] Starting new runner for {f_id}/{z_id}")
+                    # Handle zone being just a string or object
+                    # For simple case, we just pass the zone id string.
+                    # The Runner will use get_config(..., z_id) which handles the lookup
+                    # whether z_id is "zone1" or used as a key in the farm's zone list.
                     
-                    # Find config for this zone
-                    overrides = {}
-                    for farm in config.get("farms", []):
-                        if farm["id"] == f_id:
-                            # Farm-level config could go here if we supported it
-                            for z in farm.get("zones", []):
-                                if isinstance(z, dict):  # Support object zones if needed later
-                                    # Not implemented yet based on current json structure
-                                    pass
-                                elif z == z_id:
-                                    # Check for overrides if using extended format
-                                    # For now, let's assume zones can be objects too or look for sibling 'config' key
-                                    pass
-                            
-                            # Let's check if 'config' exists at farm level or zone level
-                            # Current schema matches simplified request:
-                            # "farms": [{"id": "f1", "zones": ["z1"], "config": {...}}]
-                            if "config" in farm:
-                                overrides.update(farm["config"])
-                                
-                    runner = EnvironmentRunner(f_id, z_id, config_overrides=overrides)
+                    # NOTE: Our system config defaults schema assumes simple string zone IDs or objects with "id".
+                    # We need to make sure we pass the correct ID string.
+                    real_zone_id = z_id
+                    # But wait, 'z_id' from the loop above is already guaranteed to be a string or object? 
+                    # In desired loop:
+                    # for z_id in farm.get("zones", []):
+                    #    desired.add((f_id, z_id))
+                    # Wait, if z_id is a dict {"id": "zone1"}, then (f_id, dict) is not hashable.
+                    # We need to fix the desire set logic first.
+                    
+                    # Let's fix the desire loop above first, but main() logic is partly rewritten here.
+                    
+                    runner = EnvironmentRunner(f_id, z_id, system_config=config)
                     runner.start()
                     runners[(f_id, z_id)] = runner
                     
@@ -282,6 +298,8 @@ def main():
             print(f"[ENV] Config file {config_path} not found, waiting...")
         except Exception as e:
             print(f"[ENV] Error reloading config: {e}")
+            import traceback
+            traceback.print_exc()
             
         time.sleep(5.0)
 
