@@ -14,7 +14,6 @@ from common.config import (
     FARM_ID,
 )
 
-# InfluxDB config (single place)
 INFLUX_BUCKET = os.getenv("INFLUXDB_BUCKET")
 INFLUX_ORG = os.getenv("INFLUXDB_ORG")
 
@@ -35,9 +34,6 @@ class KnowledgeStore:
         self._write_api = self._client.write_api()
         self._query_api: QueryApi = self._client.query_api()
 
-    # ------------------------------------------------------------------
-    #  WRITE SIDE
-    # ------------------------------------------------------------------
     def log_sensor(
         self,
         zone: str,
@@ -114,7 +110,7 @@ class KnowledgeStore:
             point = point.tag(k, v)
             
         for k, v in symptoms.items():
-            if k == "alert": # stored as tag or field? text is usually field in influx if unique
+            if k == "alert": 
                  point = point.field(k, str(v))
             elif isinstance(v, bool):
                  point = point.field(k, v)
@@ -165,9 +161,6 @@ class KnowledgeStore:
         if points:
              self._write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=points)
 
-    # ------------------------------------------------------------------
-    #  READ SIDE
-    # ------------------------------------------------------------------
     def get_latest_sensor_value(
         self,
         zone: str,
@@ -212,7 +205,6 @@ from(bucket: "{INFLUX_BUCKET}")
         farm = farm_id if farm_id else FARM_ID
         agg_pipe = ""
         if agg:
-            # e.g. agg="mean", "max", "min"
             agg_pipe = f'  |> aggregateWindow(every: {every}, fn: {agg}, createEmpty: false)\n'
 
         flux = f'''

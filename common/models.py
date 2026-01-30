@@ -19,9 +19,9 @@ class ZoneStatus:
 
 @dataclass
 class Action:
-    actuator: str                  # 'fan', 'heater', etc.
-    priority: int                  # lower = higher priority
-    command: Dict[str, Any]        # JSON-serializable payload
+    actuator: str                 
+    priority: int                  
+    command: Dict[str, Any]        
 
 @dataclass
 class Plan:

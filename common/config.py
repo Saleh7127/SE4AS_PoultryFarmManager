@@ -4,17 +4,14 @@ import json
 FARM_ID = os.getenv("FARM_ID", "farm1")
 ZONE_ID = os.getenv("ZONE_ID", "zone1")
 
-# --- MEASUREMENTS NAMES ---
 SENSOR_MEASUREMENT = "sensors"
 ACTUATOR_MEASUREMENT = "actuator_commands"
 SYMPTOM_MEASUREMENT = "symptoms"
 PLAN_MEASUREMENT = "plans"
 
-# Influx defaults (env can override)
 INFLUXDB_BUCKET = os.getenv("INFLUXDB_BUCKET", "farm-bucket")
 INFLUXDB_ORG = os.getenv("INFLUXDB_ORG", "farm-org")
 
-# --- HARDCODED DEFAULTS (Fallbacks) ---
 DEFAULTS = {
     "temp_min": 24.0,
     "temp_max": 28.0,
@@ -105,11 +102,6 @@ DEFAULTS = {
     "light_night_pct": 5.0
 }
 
-# --- LEGACY CONSTANTS (Deprecation Warning: Use get_config in new code) ---
-# We keep these for now so we don't break code that hasn't been migrated yet,
-# but ideally everything should switch to get_config().
-# These are initialized from DEFAULTS but can be overridden by env for backward compat if really needed,
-# though we prefer system_config.json now.
 TEMP_MIN = float(os.getenv("TEMP_MIN", DEFAULTS["temp_min"]))
 TEMP_MAX = float(os.getenv("TEMP_MAX", DEFAULTS["temp_max"]))
 TEMP_SETPOINT = float(os.getenv("TEMP_SETPOINT", DEFAULTS["temp_setpoint"]))
@@ -145,32 +137,23 @@ def get_config(key: str, system_config: dict, farm_id: str = None, zone_id: str 
     3. Global defaults (in system_config['defaults'])
     4. Hardcoded DEFAULTS
     """
-    # 1. Zone specific lookup
     if farm_id and zone_id:
         for farm in system_config.get("farms", []):
             if farm["id"] == farm_id:
-                # Check zone config
                 for z in farm.get("zones", []):
-                    # Zone can be string "zone1" or dict {"id": "zone1", "config": {...}}
                     if isinstance(z, dict) and z.get("id") == zone_id:
                         if "config" in z and key in z["config"]:
                             return z["config"][key]
                     elif z == zone_id:
-                        # Zone defined as string -> check if farm has 'config' (shared for all zones in farm)
-                        # This aligns with the schema seen in environment/main.py: 
-                        # "farms": [{"id": "f1", "config": {...}}]
                         if "config" in farm and key in farm["config"]:
                             return farm["config"][key]
                 
-                # Check farm-level config if not found in zone (and zone was object without config)
                 if "config" in farm and key in farm["config"]:
                     return farm["config"][key]
 
-    # 2. Global defaults from JSON
     if "defaults" in system_config and key in system_config["defaults"]:
         return system_config["defaults"][key]
 
-    # 3. Hardcoded defaults
     if key in DEFAULTS:
         return DEFAULTS[key]
 

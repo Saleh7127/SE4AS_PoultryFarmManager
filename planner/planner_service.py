@@ -139,9 +139,7 @@ def _build_actions_from_status(status: dict, sys_config: dict) -> List[Action]:
     activity = status.get("activity")
     co2 = status.get("co2_ppm")
 
-    # ===============================
-    # 1) FAN CONTROL (0–100%)
-    # ===============================
+    # FAN CONTROL (0–100%)
     fan_level: Optional[float] = None
 
     if temp is not None or co2 is not None:
@@ -167,9 +165,7 @@ def _build_actions_from_status(status: dict, sys_config: dict) -> List[Action]:
 
         fan_level = max(FAN_MIN, min(FAN_MAX, fan_level))
 
-    # ===============================
-    # 2) HEATER CONTROL (LEVEL 0–100%)
-    # ===============================
+    # HEATER CONTROL (LEVEL 0–100%)
     heater_level: Optional[float] = None
     if temp is not None:
         heater_on = _heater_on_state(farm_id, zone, temp, TEMP_SETPOINT, HEATER_DEADBAND_C, HEATER_MIN_ON_S, HEATER_MIN_OFF_S)
@@ -214,9 +210,7 @@ def _build_actions_from_status(status: dict, sys_config: dict) -> List[Action]:
             )
         )
 
-    # ===============================
-    # 3) FEED & WATER (HYSTERESIS REFILL)
-    # ===============================
+    # FEED & WATER (HYSTERESIS REFILL)
     feed_refill_on = _hysteresis_state(farm_id, zone, "feed", feed, FEED_REFILL_LOW_KG, FEED_REFILL_HIGH_KG)
     water_refill_on = _hysteresis_state(farm_id, zone, "water", water, WATER_REFILL_LOW_L, WATER_REFILL_HIGH_L)
 
@@ -236,9 +230,7 @@ def _build_actions_from_status(status: dict, sys_config: dict) -> List[Action]:
         )
     )
 
-    # ===============================
-    # 4) INLET (FAN + AIR QUALITY)
-    # ===============================
+    # INLET (FAN + AIR QUALITY)
     inlet_open: Optional[float] = None
     if fan_level is not None:
         inlet_open = 20.0 + 0.6 * fan_level
@@ -266,10 +258,7 @@ def _build_actions_from_status(status: dict, sys_config: dict) -> List[Action]:
             )
         )
 
-    # ===============================
-    # 5) LIGHT DIMMER (ACTIVITY)
-    # ===============================
-    # For demo: no explicit lux sensor, we infer from light level and use activity
+    # LIGHT DIMMER (ACTIVITY)
     light_level: Optional[float] = None
     now = time.localtime()
     time_of_day_h = now.tm_hour + (now.tm_min / 60.0) + (now.tm_sec / 3600.0)
@@ -307,13 +296,6 @@ def start_planner():
     config_path = "system_config.json"
     system_config = load_system_config(config_path)
 
-    # Watch for config changes in a simplified manner or just load once for now.
-    # Ideally should share a ConfigLoader class or similar.
-    # For now, we'll reload on method invocation or just keep it static.
-    # Let's simple check mtime every once in a while or just reload if we want hot reloading.
-    # Since we are callback driven, we can store sys_config in mutable container or variable
-    # attached to the function scope via closure or class.
-    # Simpler: Make sys_config a mutable dict wrapper.
     
     config_container = {"data": system_config, "last_load": time.time()}
 
@@ -330,9 +312,6 @@ def start_planner():
              if now - config_container["last_load"] > 5.0:
                  if os.path.exists(config_path):
                      mtime = os.path.getmtime(config_path)
-                     # We don't track mtime in this simple container, but we could.
-                     # For now, just reload to be safe and "hot".
-                     # Optimization: check mtime
                      config_container["data"] = load_system_config(config_path)
                      config_container["last_load"] = now
         except Exception as e:

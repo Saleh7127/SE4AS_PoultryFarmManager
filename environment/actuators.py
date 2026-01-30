@@ -113,7 +113,6 @@ class EnvSimulator:
 
     def snapshot(self) -> EnvironmentState:
         with self._lock:
-            # shallow copy is fine for simple dataclass
             return EnvironmentState(**self.state.__dict__)
 
 

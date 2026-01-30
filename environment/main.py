@@ -33,19 +33,15 @@ class EnvironmentRunner(threading.Thread):
         self.zone_id = zone_id
         self.system_config = system_config
         
-        # Load Simulation Config for this zone
         self.config = SimulationConfig()
         
-        # Iterate over dataclass fields and try to load from system_config
         for field_info in fields(SimulationConfig):
             key = field_info.name
             val = get_config(key, system_config, farm_id, zone_id)
             if val is not None:
-                # Convert type if necessary (env vars were usually string, json is typed but safer to cast)
                 target_type = field_info.type
                 try:
                     if target_type == bool:
-                         # Handle typical bool strings if they come from loose json/env
                          if isinstance(val, str):
                              val = val.lower() in ("true", "1", "yes")
                          else:
@@ -56,8 +52,6 @@ class EnvironmentRunner(threading.Thread):
                 except (ValueError, TypeError) as e:
                     print(f"[ENV {farm_id}/{zone_id}] Warning: Could not cast config {key}={val} to {target_type}: {e}")
 
-        # Initialize State
-        # Note: Some state fields depend on config (like bird_count), we sync them.
         self.state = EnvironmentState(auto_control=self.config.auto_control)
         self.state.bird_count = self.config.bird_count
         self.state.barn_volume_m3 = self.config.barn_volume_m3
@@ -65,24 +59,17 @@ class EnvironmentRunner(threading.Thread):
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         
-        # Unique client ID per runner
         client_id = f"env_{farm_id}_{zone_id}"
         self.client = create_mqtt_client(client_id)
         self._sim_accum_s = 0.0
-
-        # attach callbacks
         self.client.on_message = self._on_message
 
     def run(self):
-        # subscribe to all actuator command topics
         cmd_topic = f"{self.farm_id}/{self.zone_id}/cmd/+"
         print(f"[ENV {self.farm_id}/{self.zone_id}] Subscribing to {cmd_topic}")
         self.client.subscribe(cmd_topic)
-
-        # start MQTT network loop in background
         self.client.loop_start()
 
-        # main simulation loop: sensor publish every 5s, model tick per SIM_STEP_S
         print(f"[ENV {self.farm_id}/{self.zone_id}] Simulation started.")
         while not self._stop_event.is_set():
             self._sim_accum_s += SENSOR_INTERVAL_S
@@ -91,7 +78,6 @@ class EnvironmentRunner(threading.Thread):
                 self._sim_accum_s -= SIM_STEP_S
             self._publish_sensors()
             
-            # Use event wait for sleep to allow quicker interrupt
             self._stop_event.wait(SENSOR_INTERVAL_S)
             
     def stop(self):
@@ -116,7 +102,6 @@ class EnvironmentRunner(threading.Thread):
         prefix = f"[ENV {self.farm_id}/{self.zone_id}]"
         
         if s.sim_time_s < self.config.startup_override_s:
-            # print(f"{prefix} Ignoring actuator command during startup override")
             return
 
         if actuator == "fan":
@@ -187,14 +172,12 @@ class EnvironmentRunner(threading.Thread):
 
     def _snapshot(self) -> EnvironmentState:
         with self._lock:
-            # shallow copy via dataclass constructor
             return EnvironmentState(**self.state.__dict__)
 
     def _publish_sensors(self):
         s = self._snapshot()
         base = f"{self.farm_id}/{self.zone_id}/sensors"
 
-        # measurement noise
         temperature_c = s.temperature_c + random.gauss(0.0, 0.2)
         co2_ppm = max(400.0, s.co2_ppm + random.gauss(0.0, 30.0))
         nh3_ppm = max(0.0, s.nh3_ppm + random.gauss(0.0, 2.0))
@@ -202,7 +185,6 @@ class EnvironmentRunner(threading.Thread):
         water_l = max(0.0, s.water_l + random.gauss(0.0, 0.002))
         activity = max(0.0, min(1.0, s.activity + random.gauss(0.0, 0.02)))
 
-        # air: temperature, CO2, NH3
         air_payload = {
             "temperature_c": temperature_c,
             "co2_ppm": co2_ppm,
@@ -210,15 +192,12 @@ class EnvironmentRunner(threading.Thread):
         }
         self.client.publish(f"{base}/air", json.dumps(air_payload))
 
-        # feed level
         feed_payload = {"feed_kg": feed_kg}
         self.client.publish(f"{base}/feed_level", json.dumps(feed_payload))
 
-        # water level
         water_payload = {"water_l": water_l}
         self.client.publish(f"{base}/water_level", json.dumps(water_payload))
 
-        # activity
         activity_payload = {"activity": activity}
         self.client.publish(f"{base}/activity", json.dumps(activity_payload))
 
@@ -235,11 +214,10 @@ def main():
     print("[ENV] Starting Multi-Farm Environment Manager with Hot-Reloading...")
     
     config_path = "system_config.json"
-    runners = {} # (farm_id, zone_id) -> EnvironmentRunner
+    runners = {} 
     last_mtime = 0.0
 
     while True:
-        # Check file modification time
         try:
             mtime = os.path.getmtime(config_path)
             if mtime > last_mtime:
@@ -248,12 +226,10 @@ def main():
                 
                 config = load_system_config(config_path)
                 
-                # Determine desired set of runners
                 desired = set()
                 for farm in config.get("farms", []):
                     f_id = farm["id"]
                     for z in farm.get("zones", []):
-                        # Handle both string zones and object zones
                         z_id = z["id"] if isinstance(z, dict) else z
                         desired.add((f_id, z_id))
                 
@@ -262,31 +238,13 @@ def main():
                 to_add = desired - current
                 to_remove = current - desired
                 
-                # Start new runners
                 for (f_id, z_id) in to_add:
                     print(f"[ENV] Starting new runner for {f_id}/{z_id}")
-                    # Handle zone being just a string or object
-                    # For simple case, we just pass the zone id string.
-                    # The Runner will use get_config(..., z_id) which handles the lookup
-                    # whether z_id is "zone1" or used as a key in the farm's zone list.
-                    
-                    # NOTE: Our system config defaults schema assumes simple string zone IDs or objects with "id".
-                    # We need to make sure we pass the correct ID string.
                     real_zone_id = z_id
-                    # But wait, 'z_id' from the loop above is already guaranteed to be a string or object? 
-                    # In desired loop:
-                    # for z_id in farm.get("zones", []):
-                    #    desired.add((f_id, z_id))
-                    # Wait, if z_id is a dict {"id": "zone1"}, then (f_id, dict) is not hashable.
-                    # We need to fix the desire set logic first.
-                    
-                    # Let's fix the desire loop above first, but main() logic is partly rewritten here.
-                    
                     runner = EnvironmentRunner(f_id, z_id, system_config=config)
                     runner.start()
                     runners[(f_id, z_id)] = runner
                     
-                # Stop removed runners
                 for (f_id, z_id) in to_remove:
                     print(f"[ENV] Stopping runner for {f_id}/{z_id}")
                     runner = runners.pop((f_id, z_id))

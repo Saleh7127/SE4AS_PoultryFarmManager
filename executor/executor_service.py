@@ -81,7 +81,7 @@ def start_executor():
             mqtt_client.publish(cmd_topic, payload_str)
             print(f"[EXECUTOR] Sent command to {cmd_topic}: {payload_str}")
 
-            # ----- Log to Knowledge -----
+            # Log to Knowledge
             state_str = ""
             numeric = {}
 
