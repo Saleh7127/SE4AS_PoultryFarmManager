@@ -1,9 +1,6 @@
 version: "3.9"
 
 services:
-  # ==========================
-  # MQTT broker (Mosquitto)
-  # ==========================
   mqtt:
     image: eclipse-mosquitto:2.0
     container_name: mqtt
@@ -19,10 +16,6 @@ services:
       - farm-net
     restart: unless-stopped
 
-
-  # ==========================
-  # InfluxDB v2 (Knowledge)
-  # ==========================
   influxdb:
     image: influxdb:2.7
     container_name: influxdb
@@ -43,10 +36,6 @@ services:
       - farm-net
     restart: unless-stopped
 
-  # ==========================
-  # Grafana (Dashboards)
-  # Auto-provisioned datasource
-  # ==========================
   grafana:
     image: grafana/grafana-oss:latest
     container_name: grafana
@@ -68,10 +57,6 @@ services:
       - farm-net
     restart: unless-stopped
 
-  # ==========================
-  # Managed Resource
-  # Environment (sensors + actuators)
-  # ==========================
   environment:
     build:
       context: .
@@ -86,9 +71,6 @@ services:
       - farm-net
     restart: unless-stopped
 
-  # ==========================
-  # MAPE-K: Monitor (M)
-  # ==========================
   monitor:
     build:
       context: .
@@ -104,9 +86,6 @@ services:
       - farm-net
     restart: unless-stopped
 
-  # ==========================
-  # MAPE-K: Analyzer (A)
-  # ==========================
   analyzer:
     build:
       context: .
@@ -121,9 +100,6 @@ services:
       - farm-net
     restart: unless-stopped
 
-  # ==========================
-  # MAPE-K: Planner (P)
-  # ==========================
   planner:
     build:
       context: .
@@ -138,9 +114,6 @@ services:
       - farm-net
     restart: unless-stopped
 
-  # ==========================
-  # MAPE-K: Executor (E)
-  # ==========================
   executor:
     build:
       context: .
@@ -156,9 +129,6 @@ services:
       - farm-net
     restart: unless-stopped
 
-# ==========================
-# Networks & Volumes
-# ==========================
 networks:
   farm-net:
 
