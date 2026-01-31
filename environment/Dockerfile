@@ -5,7 +5,6 @@ WORKDIR /app
 COPY environment/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# copy shared common code
 COPY common /app/common
 COPY environment /app/environment
 
