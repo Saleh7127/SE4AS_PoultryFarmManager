@@ -96,6 +96,7 @@ def start_analyzer():
     
     ks = KnowledgeStore()
     mqtt_client = create_mqtt_client("analyzer")
+    mqtt_client.loop_start()
 
     while True:
         # Reload config dynamically

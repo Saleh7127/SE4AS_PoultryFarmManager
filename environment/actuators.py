@@ -8,10 +8,8 @@ import paho.mqtt.client as mqtt
 from common.config import FARM_ID, ZONE_ID
 from environment.model import (
     EnvironmentState,
+    SimulationConfig,
     step,
-    STARTUP_OVERRIDE_S,
-    FEED_REFILL_FLOW_KG_S,
-    WATER_REFILL_FLOW_L_S,
 )
 
 MQTT_HOST = "mqtt"
@@ -25,7 +23,10 @@ AUTO_CONTROL = os.getenv("AUTO_CONTROL", "true").lower() in {"1", "true", "yes"}
 
 class EnvSimulator:
     def __init__(self):
+        self.config = SimulationConfig()
         self.state = EnvironmentState(auto_control=AUTO_CONTROL)
+        self.state.bird_count = self.config.bird_count
+        self.state.barn_volume_m3 = self.config.barn_volume_m3
         self._lock = threading.Lock()
         self.client = mqtt.Client(client_id="environment")
         self.client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
@@ -52,7 +53,7 @@ class EnvSimulator:
 
     def apply_command(self, actuator: str, data: dict):
         s = self.state
-        if s.sim_time_s < STARTUP_OVERRIDE_S:
+        if s.sim_time_s < self.config.startup_override_s:
             return
 
         if actuator == "fan":
@@ -88,8 +89,8 @@ class EnvSimulator:
             else:
                 amount_g = float(data.get("amount_g", 0.0))
                 amount_kg = max(0.0, amount_g) / 1000.0
-                if amount_kg > 0.0 and FEED_REFILL_FLOW_KG_S > 0.0:
-                    s.feed_refill_remaining_s = amount_kg / FEED_REFILL_FLOW_KG_S
+                if amount_kg > 0.0 and self.config.feed_refill_flow_kg_s > 0.0:
+                    s.feed_refill_remaining_s = amount_kg / self.config.feed_refill_flow_kg_s
 
         elif actuator == "water_valve":
             action = data.get("action", "").upper()
@@ -109,7 +110,7 @@ class EnvSimulator:
 
     def tick(self, dt_s: float):
         with self._lock:
-            step(self.state, dt_s)
+            step(self.state, self.config, dt_s)
 
     def snapshot(self) -> EnvironmentState:
         with self._lock:
