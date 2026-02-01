@@ -1,18 +1,18 @@
-# Autonomous Poultry Farm Manager 🐔
+# Autonomous Poultry Farm Manager 
 
 An autonomous, self-adaptive system (SAS) designed to manage environmental conditions in poultry farms using the **MAPE-K** feedback loop architecture.
 
 ## 1. Introduction
 This project is an **Autonomous Self-Adaptive System (SAS)** designed to manage the delicate environment of modern poultry farms. It acts as an "Autopilot", creating a closed feedback loop: it watches sensors, analyzes conditions, plans actions, and controls fans/heaters continuously.
 
-### The Problem ⚠️
+### The Problem 
 Poultry birds are extremely sensitive to environmental changes.
 *   **Temperature**: Too hot (>28°C) = Heat stress/death. Too cold (<20°C) = Sickness.
 *   **Air Quality**: CO2 and Ammonia (from waste) can damage respiratory systems.
 *   **Complexity**: Temperature, humidity, and air quality interact (e.g., turning on fans cools the barn but also removes humidity).
 *   **Scale**: Managing dozens of barns manually 24/7 is labor-intensive and error-prone.
 
-### The Solution 💡
+### The Solution 
 A distributed system that continuously monitors the farm and adjusts actuators (fans, heaters, windows) to maintain optimal conditions.
 
 Key features:
@@ -23,12 +23,12 @@ Key features:
 
 ---
 
-## 2. Architecture (MAPE-K) 🏛️
+## 2. Architecture (MAPE-K) 
 
 The system follows the **MAPE-K** architectural pattern (Monitor, Analyze, Plan, Execute, Knowledge) widely used in autonomous computing. It is built as a set of Docker microservices communicating via an **MQTT Bus**.
 
 <p align="center">
-  <img src="system_architecture.png" alt="System Architecture" width="800">
+  <img src="assets/system_architecture.png" alt="System Architecture" width="800">
 </p>
 
 ### MAPE-K Matrix: System vs Human Analogy
@@ -50,8 +50,14 @@ Let's trace a single "Heartbeat" of the system:
 
 1.  **Simulation Tick**: The `Environment` service simulates 5 seconds of physics. The temperature rises because of the birds' body heat.
 2.  **Sensing**: The environment publishes a message to MQTT:
-    *   `Topic`: `farm1/zone1/sensors/air`
-    *   `Payload`: `{"temperature_c": 28.5, "co2_ppm": 1200}`
+    *   `Topic`: 
+    ```bash
+    farm1/zone1/sensors/air
+    ```
+    *   `Payload`: 
+    ```bash
+    {"temperature_c": 24.5, "co2_ppm": 2200}
+    ```
 3.  **Monitoring**: The `Monitor` service sees this message and saves it to **InfluxDB** (Knowledge).
 4.  **Analysis**: The `Analyzer` service wakes up, reads the latest data from InfluxDB, and compares it to `system_config.json`.
     *   *Rule*: Temp limit is 28.0.
@@ -70,23 +76,23 @@ Let's trace a single "Heartbeat" of the system:
 
 ## 4. Components in Detail
 
-*   **Managed System (Environment)** 🏠
+*   **Managed System (Environment)** 
     *   `environment/model.py`: Physics (thermodynamics, gas laws) and biology (bird metabolism) simulation.
-*   **Monitor (M)** 👁️
+*   **Monitor (M)** 
     *   `monitor/monitor_service.py`: Pure data ingestion. Standardizes and logs raw MQTT sensor data into **InfluxDB**.
-*   **Analyzer (A)** 🧠
+*   **Analyzer (A)** 
     *   `analyzer/analyzer_service.py`: Symptom Detection. Checks knowledge against goals (from `system_config.json`) and publishes Status events.
-*   **Planner (P)** 📋
+*   **Planner (P)** 
     *   `planner/planner_service.py`: **The Brain**. Decides on actions using P-Controllers and Hysteresis logic to smooth out fluctuations and prevent rapid toggling.
-*   **Executor (E)** ⚙️
+*   **Executor (E)** 
     *   `executor/executor_service.py`: **The Hands**. Translates high-level Plans into specific actuator hardware commands.
-*   **Knowledge (K)** 📚
+*   **Knowledge (K)** 
     *   **InfluxDB**: Time-series history (Simulated "Experience").
     *   **system_config.json**: Policies, Thresholds, and Physics parameters.
 
 ---
 
-## 5. Getting Started 🚀
+## 5. Getting Started 
 
 ### Prerequisites
 *   [Docker Desktop](https://www.docker.com/products/docker-desktop)
@@ -145,7 +151,7 @@ docker compose exec mqtt mosquitto_pub -u admin -P admin -t "farm1/zone1/cmd/fee
 
 ---
 
-## 7. Project Structure 📂
+## 7. Project Structure 
 
 *   **`analyzer/`**: (A) Service that checks sensor data against thresholds.
 *   **`planner/`**: (P) Service that decides actions.
@@ -158,7 +164,7 @@ docker compose exec mqtt mosquitto_pub -u admin -P admin -t "farm1/zone1/cmd/fee
 *   **`system_config.json`**: Central configuration for thresholds, physics, and zones.
 *   **`docker-compose.yml`**: Orchestration for all services.
 
-## 8. Technologies Used 🛠️
+## 8. Technologies Used 
 *   **Docker**: Microservice containerization.
 *   **Eclipse Mosquitto**: Real-time MQTT messaging bus.
 *   **InfluxDB**: Time-series Knowledge Base.

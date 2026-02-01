@@ -7,10 +7,10 @@ import paho.mqtt.client as mqtt
 from common.config import FARM_ID, ZONE_ID
 from environment.actuators import EnvSimulator
 
-MQTT_HOST = "mqtt"
-MQTT_PORT = 1883
-MQTT_USER = "admin"
-MQTT_PASSWORD = "admin"
+MQTT_HOST = os.getenv("MQTT_HOST", "mqtt")
+MQTT_PORT = os.getenv("MQTT_PORT", 1883)
+MQTT_USER = os.getenv("MQTT_USER", "admin")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "admin")
 SENSOR_INTERVAL_S = float(os.getenv("SENSOR_INTERVAL_S", 5.0))
 SIM_STEP_S = float(os.getenv("SIM_STEP_S", SENSOR_INTERVAL_S))
 

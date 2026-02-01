@@ -5,6 +5,7 @@ import time
 
 @dataclass
 class SimulationConfig:
+    # Physical Constants (Defaults OK)
     outside_temp_base_c: float = 12.0
     outside_temp_swing_c: float = 4.0
     outside_temp_period_s: float = 24.0 * 3600.0
@@ -21,54 +22,55 @@ class SimulationConfig:
     air_density: float = 1.2
     air_cp: float = 1005.0
 
-    fan_max_flow_m3_s: float = 4.0
-    base_infiltration_m3_s: float = 0.15
+    fan_stages: tuple = (0.0, 40.0, 70.0, 100.0)
 
-    heater_power_w: float = 120000.0
-    bird_count: int = 2000
-    bird_heat_w_base: float = 10.0
-    bird_heat_w_activity: float = 6.0
-    co2_lps_per_bird: float = 0.0012
-    co2_activity_mult: float = 1.5
-    nh3_mg_s_per_bird: float = 0.04
-    nh3_activity_mult: float = 1.5
-    nh3_temp_coeff: float = 0.04
-    nh3_decay_per_s: float = 0.0002777778
-    feed_g_per_bird_day: float = 160.0
-    water_l_per_bird_day: float = 0.35
-    feed_activity_mult: float = 0.8
-    water_activity_mult: float = 1.1
-    feed_hopper_capacity_kg: float = 12.0
-    water_tank_capacity_l: float = 10.0
-    feed_refill_flow_kg_s: float = 0.04
-    water_refill_flow_l_s: float = 0.25
-    feed_initial_kg: float = 8.0
-    water_initial_l: float = 7.0
+    # Configurable Parameters (Loaded from Config)
+    fan_max_flow_m3_s: float = None
+    base_infiltration_m3_s: float = None
 
-    fan_on_temp_c: float = 25.0
-    fan_off_temp_c: float = 23.0
-    heater_on_temp_c: float = 20.0
-    heater_off_temp_c: float = 24.0
-    auto_fan_level: float = 60.0
+    heater_power_w: float = None
+    bird_count: int = None
+    bird_heat_w_base: float = None
+    bird_heat_w_activity: float = None
+    co2_lps_per_bird: float = None
+    co2_activity_mult: float = None
+    nh3_mg_s_per_bird: float = None
+    nh3_activity_mult: float = None
+    nh3_temp_coeff: float = None
+    nh3_decay_per_s: float = None
+    feed_g_per_bird_day: float = None
+    water_l_per_bird_day: float = None
+    feed_activity_mult: float = None
+    water_activity_mult: float = None
+    feed_hopper_capacity_kg: float = None
+    water_tank_capacity_l: float = None
+    feed_refill_flow_kg_s: float = None
+    water_refill_flow_l_s: float = None
+    feed_initial_kg: float = None
+    water_initial_l: float = None
 
-    min_fan_on_s: float = 120.0
-    min_fan_off_s: float = 120.0
+    fan_on_temp_c: float = None
+    fan_off_temp_c: float = None
+    heater_on_temp_c: float = None
+    heater_off_temp_c: float = None
+    auto_fan_level: float = None
+
+    min_fan_on_s: float = None
+    min_fan_off_s: float = None
 
     auto_control: bool = True
-    auto_control_timeout_s: float = 300.0
-
-    fan_stages: tuple = (0.0, 40.0, 70.0, 100.0)
+    auto_control_timeout_s: float = None
     
-    lights_on_h: float = 6.0
-    lights_off_h: float = 22.0
-    light_day_pct: float = 70.0
-    light_night_pct: float = 5.0
+    lights_on_h: float = None
+    lights_off_h: float = None
+    light_day_pct: float = None
+    light_night_pct: float = None
 
-    fan_ramp_per_min: float = 40.0
-    heater_ramp_per_min: float = 60.0
-    inlet_ramp_per_min: float = 60.0
-    light_ramp_per_min: float = 80.0
-    activity_time_constant_min: float = 8.0
+    fan_ramp_per_min: float = None
+    heater_ramp_per_min: float = None
+    inlet_ramp_per_min: float = None
+    light_ramp_per_min: float = None
+    activity_time_constant_min: float = None
 
 
 @dataclass
