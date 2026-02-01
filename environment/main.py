@@ -8,7 +8,7 @@ import time
 from dataclasses import fields
 
 from common.mqtt_utils import create_mqtt_client
-from common.config import FARM_ID, ZONE_ID, get_config
+from common.config import get_config
 from .model import (
     EnvironmentState,
     SimulationConfig,

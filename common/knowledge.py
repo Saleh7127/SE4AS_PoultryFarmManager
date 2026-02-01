@@ -11,7 +11,6 @@ from common.config import (
     ACTUATOR_MEASUREMENT,
     SYMPTOM_MEASUREMENT,
     PLAN_MEASUREMENT,
-    FARM_ID,
 )
 
 INFLUX_BUCKET = os.getenv("INFLUXDB_BUCKET")
@@ -48,7 +47,7 @@ class KnowledgeStore:
         sensor_type examples: "temperature", "co2", "ammonia",
                               "feed_level", "water_level", "activity"
         """
-        farm = farm_id if farm_id else FARM_ID
+        farm = farm_id 
         tags = {"farm": farm, "zone": zone, "type": sensor_type}
         if extra_tags:
             tags.update(extra_tags)
@@ -74,7 +73,7 @@ class KnowledgeStore:
 
         numeric_fields can hold things like {"level": 60} or {"duration_s": 15}
         """
-        farm = farm_id if farm_id else FARM_ID
+        farm = farm_id 
         tags = {"farm": farm, "zone": zone, "actuator": actuator}
 
         point = Point(ACTUATOR_MEASUREMENT)
@@ -102,7 +101,7 @@ class KnowledgeStore:
         symptoms dict should contain boolean flags or simple values.
         e.g. {"temp_ok": False, "alert_text": "Too cold"}
         """
-        farm = farm_id if farm_id else FARM_ID
+        farm = farm_id
         tags = {"farm": farm, "zone": zone}
         
         point = Point(SYMPTOM_MEASUREMENT)
@@ -132,7 +131,7 @@ class KnowledgeStore:
         plan_actions is a list of dicts: [{"actuator": "fan", "command": {...}, "priority": 1}]
         Each action becomes a point.
         """
-        farm = farm_id if farm_id else FARM_ID
+        farm = farm_id 
         points = []
         for action in plan_actions:
             actuator = action.get("actuator", "unknown")
@@ -171,7 +170,7 @@ class KnowledgeStore:
         """
         Return the latest sensor value for given zone/type in the last `window`.
         """
-        farm = farm_id if farm_id else FARM_ID
+        farm = farm_id 
         flux = f'''
 from(bucket: "{INFLUX_BUCKET}")
   |> range(start: {window})
@@ -202,7 +201,7 @@ from(bucket: "{INFLUX_BUCKET}")
 
         Returns list of { "time": <ISO>, "value": <float> }
         """
-        farm = farm_id if farm_id else FARM_ID
+        farm = farm_id
         agg_pipe = ""
         if agg:
             agg_pipe = f'  |> aggregateWindow(every: {every}, fn: {agg}, createEmpty: false)\n'

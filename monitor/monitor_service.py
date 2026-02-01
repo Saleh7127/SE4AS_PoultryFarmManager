@@ -1,14 +1,13 @@
-# monitor/monitor_service.py (or wherever start_monitor is)
+# monitor/monitor_service.py
 import json
 from common.mqtt_utils import create_mqtt_client
-from common.config import FARM_ID
 from common.knowledge import KnowledgeStore
 
 def start_monitor():
     ks = KnowledgeStore()
     mqtt_client = create_mqtt_client("monitor")
 
-    # Subscribe to all farms, all zones (wildcard)
+    # Subscribe to all farms, all zones 
     # Topic format: {farm_id}/{zone_id}/sensors/{sensor_type}
     topic = "+/+/sensors/+"
     print(f"[MONITOR] Subscribing to {topic}")

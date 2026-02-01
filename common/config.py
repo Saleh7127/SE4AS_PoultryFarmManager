@@ -1,9 +1,6 @@
 import os
 import json
 
-FARM_ID = os.getenv("FARM_ID", "farm1")
-ZONE_ID = os.getenv("ZONE_ID", "zone1")
-
 SENSOR_MEASUREMENT = "sensors"
 ACTUATOR_MEASUREMENT = "actuator_commands"
 SYMPTOM_MEASUREMENT = "symptoms"
@@ -19,7 +16,7 @@ def load_system_config(path="system_config.json"):
             return json.load(f)
     except Exception as e:
         print(f"Error loading system config from {path}: {e}")
-        return {"farms": [{"id": FARM_ID, "zones": [ZONE_ID]}]}
+        return {"farms": []}
 
 def get_config(key: str, system_config: dict, farm_id: str = None, zone_id: str = None, default=None):
     """

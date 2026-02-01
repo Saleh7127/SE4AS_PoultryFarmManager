@@ -4,8 +4,7 @@ import time
 
 from common.mqtt_utils import create_mqtt_client
 from common.config import (
-    load_system_config, get_config,
-    FARM_ID, ZONE_ID
+    load_system_config, get_config
 )
 from common.knowledge import KnowledgeStore
 

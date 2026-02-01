@@ -1,14 +1,25 @@
 import json
 import os
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 from common.mqtt_utils import create_mqtt_client
 from common.config import get_config, load_system_config
-from common.models import Action, Plan
 from common.knowledge import KnowledgeStore
+from dataclasses import dataclass
 
-# Helper to avoid importing too many constants if we can look them up dynamically
+@dataclass
+class Action:
+    actuator: str                 
+    priority: int                  
+    command: Dict[str, Any]        
+
+@dataclass
+class Plan:
+    zone: str
+    actions: List[Action]
+
+# Helper to avoid importing too many constants 
 # We will use get_config for everything.
 
 _LAST_LEVELS: Dict[Tuple[str, str], float] = {}
@@ -123,9 +134,6 @@ def _build_actions_from_status(status: dict, sys_config: dict) -> List[Action]:
     HEATER_RATE_LIMIT_PER_MIN = float(cfg("heater_rate_limit_per_min"))
     INLET_RATE_LIMIT_PER_MIN = float(cfg("inlet_rate_limit_per_min"))
     LIGHT_RATE_LIMIT_PER_MIN = float(cfg("light_rate_limit_per_min"))
-    
-    FEED_THRESHOLD = float(cfg("feed_threshold"))
-    WATER_THRESHOLD = float(cfg("water_threshold"))
     
     FEED_REFILL_LOW_KG = float(cfg("feed_refill_low_kg"))
     FEED_REFILL_HIGH_KG = float(cfg("feed_refill_high_kg"))

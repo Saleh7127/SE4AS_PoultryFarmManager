@@ -3,7 +3,6 @@ import os
 import json
 
 from common.mqtt_utils import create_mqtt_client
-from common.config import FARM_ID, ZONE_ID
 from common.knowledge import KnowledgeStore
 
 

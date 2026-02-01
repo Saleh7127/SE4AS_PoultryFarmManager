@@ -73,7 +73,7 @@
         "light_activity_high": 0.85,
         "heater_on_temp_c": 20.0,
         "heater_off_temp_c": 24.0,
-        "auto_control": true,
+        "auto_control": false,
         "startup_override_s": 0.0,
         "fan_on_temp_c": 25.0,
         "fan_off_temp_c": 23.0,
